@@ -57,6 +57,12 @@ DOWNLOAD_ALL = os.getenv('DOWNLOAD_ALL', 'true').lower() in ('true', '1', 'yes')
 # Show yt-dlp output (verbose mode)
 VERBOSE = os.getenv('VERBOSE', 'true').lower() in ('true', '1', 'yes')
 
+# Logging level: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+
+# Include timestamps in log output
+LOG_TIMESTAMPS = os.getenv('LOG_TIMESTAMPS', 'true').lower() in ('true', '1', 'yes')
+
 # Skip subtitle download
 NO_SUBTITLES = os.getenv('NO_SUBTITLES', 'false').lower() in ('true', '1', 'yes')
 
@@ -126,7 +132,8 @@ def print_config():
     print(f"  Download Delay: {DOWNLOAD_DELAY}s")
     print(f"  Download All: {DOWNLOAD_ALL}")
     print(f"  Verbose: {VERBOSE}")
-    print(f"  Use Selenium: {USE_SELENIUM}")
+    print(f"  Log Level: {LOG_LEVEL}")
+    print(f"  Log Timestamps: {LOG_TIMESTAMPS}")
     if ANIME_URL_QUEUE:
         print(f"  URLs in Queue: {len(ANIME_URL_QUEUE)}")
     print()
