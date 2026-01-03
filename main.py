@@ -569,10 +569,11 @@ def scrape_and_download_parallel(
             ep_data.sort(key=lambda x: x[0])
 
             # Update total count
+            total_episodes = len(ep_data)
             with stats_lock:
-                stats['total'] = len(ep_data)
+                stats['total'] = total_episodes
 
-            logger.success(f"Found {len(ep_data)} episodes to process")
+            logger.success(f"Found {total_episodes} episodes to process")
 
             # Feed episodes to download queue one by one
             for ep_num, ep_url, ep_title in ep_data:
@@ -580,7 +581,8 @@ def scrape_and_download_parallel(
                     break
 
                 # Use the format_filename method based on config
-                filename = anime.format_filename(ep_num, ep_title, FILENAME_FORMAT)
+                # Pass total_episodes so single-episode anime (movies/OVAs) skip numbering
+                filename = anime.format_filename(ep_num, ep_title, FILENAME_FORMAT, total_episodes)
                 filename = sanitize_filename(filename)
                 episode = Episode(
                     number=ep_num,

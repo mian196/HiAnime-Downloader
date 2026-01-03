@@ -73,7 +73,7 @@ class Anime:
     def to_dict(self) -> dict:
         return asdict(self)
 
-    def format_filename(self, ep_num: int, ep_title: str = "", fmt: str = "standard") -> str:
+    def format_filename(self, ep_num: int, ep_title: str = "", fmt: str = "standard", total_episodes: int = 0) -> str:
         """
         Generate filename based on format preference.
 
@@ -81,10 +81,15 @@ class Anime:
             ep_num: Episode number
             ep_title: Episode title (optional)
             fmt: Format type - 'full', 'standard', 'short', 'season', 'episode'
+            total_episodes: Total number of episodes (if 1, skip episode numbering for movies/OVAs)
 
         Returns:
             Formatted filename (without extension)
         """
+        # For single-episode anime (movies, OVAs, specials), just use the anime title
+        if total_episodes == 1:
+            return self.name
+
         season_ep = f"S{self.season_number:02d}E{ep_num:02d}"
 
         if fmt == "episode":
@@ -831,10 +836,11 @@ class HianimeExtractor:
         if not scraped:
             return []
 
+        total_episodes = len(scraped)
         episodes = []
         for ep_num, ep_url, ep_title in scraped:
-            # Use the new format_filename method
-            filename = anime.format_filename(ep_num, ep_title, filename_format)
+            # Use the new format_filename method (passes total for single-episode detection)
+            filename = anime.format_filename(ep_num, ep_title, filename_format, total_episodes)
             filename = sanitize_filename(filename)
 
             episodes.append(Episode(
