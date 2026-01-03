@@ -1,73 +1,50 @@
-# Parallel Anime Downloader
+# HiAnime Downloader
 
-A simple, multi-threaded anime downloader for Hianime.to.
+A parallel anime downloader for hianime.to with automatic subtitle embedding.
+
+## Features
+
+- **Parallel scraping + downloading** - Downloads start as soon as URLs are found
+- **Handles non-sequential episode IDs** - Scrapes actual URLs from the page
+- **Search by name** - Find anime without knowing the URL
+- **Sub/Dub selection** - Choose Japanese or English audio
+- **Season number support** - Proper naming (S01E05 format)
+- **Auto subtitle embedding** - Subtitles enabled by default in video player
+- **Queue mode** - Download multiple anime in sequence
+- **CSV export** - Save episode list for later download
 
 ## Quick Start
 
-### Step 1: Install Python
-Download and install Python from the [official website](https://www.python.org/downloads/) or use winget:
+### 1. Install Python
 ```bash
 winget install Python.Python.3.13
 ```
 
-### Step 2: Install FFmpeg
-Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html) and add it to your PATH, or use winget:
+### 2. Install FFmpeg
 ```bash
 winget install Gyan.FFmpeg
 ```
 
-### Step 3: Install yt-dlp
+### 3. Install yt-dlp with HiAnime plugin
 ```bash
-python3 -m pip install -U "yt-dlp[default]"
+pip install yt-dlp
+pip install -U https://github.com/pratikpatel8982/yt-dlp-hianime/archive/master.zip
 ```
 
-### Step 4: Install yt-dlp Hianime Plugin
+### 4. Install dependencies
 ```bash
-python -m pip install -U https://github.com/pratikpatel8982/yt-dlp-hianime/archive/master.zip
-```
-Plugin source: https://github.com/pratikpatel8982/yt-dlp-hianime
-
-### Step 5: Install Python Dependencies
-```bash
-cd parallel_downloader
 pip install -r requirements.txt
 ```
 
-### Step 6: Run the Downloader
+### 5. Configure (optional)
+```bash
+cp .env.example .env
+# Edit .env with your settings
+```
+
+### 6. Run
 ```bash
 python main.py
-```
-
----
-
-## Features
-
-This tool:
-
-1. **Generates** episode URLs based on the sequential `?ep=` pattern
-2. **Saves** episode list to CSV with proper filenames (`Anime Title - EP01`)
-3. **Downloads** using yt-dlp (with hianime plugin) in parallel
-4. **Embeds** subtitles with FFmpeg - subtitles are **enabled by default**
-5. **Cleans up** separate SRT files after embedding
-
-## Requirements
-
-- Python 3.8+
-- yt-dlp with hianime extractor plugin
-- FFmpeg (must be in PATH)
-
-## Installation
-
-```bash
-cd parallel_downloader
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Make sure yt-dlp is installed
-pip install yt-dlp
-
-# Make sure ffmpeg is in your PATH
 ```
 
 ## Usage
@@ -77,59 +54,138 @@ pip install yt-dlp
 python main.py
 ```
 
-### With URL
+### Search by Name
 ```bash
-python main.py -u "https://hianime.to/watch/bleach-806?ep=13793"
+python main.py -s "bleach"
 ```
 
-### Generate CSV Only (no download)
+### Direct URL
 ```bash
-python main.py --csv-only
+python main.py -u "https://hianime.to/watch/bleach-806"
 ```
 
-### Custom Worker Counts
+### Fetch Only (no download)
 ```bash
-python main.py --download-workers 8 --embed-workers 6
+python main.py -u "URL" --fetch-only
+# Creates CSV with episode URLs for later download
+```
+
+### Download from CSV
+```bash
+python main.py --from-csv "output/AnimeName/AnimeName_episodes.csv"
+```
+
+### Options
+```bash
+python main.py --help
+
+Options:
+  -u, --url             Anime URL
+  -s, --search          Search anime by name
+  -o, --output          Output directory (default: output)
+  --from-csv            Download from existing CSV file
+  --fetch-only          Only scrape URLs to CSV, no download
+  --download-workers    Number of parallel downloads (default: 2)
+  --embed-workers       Number of parallel FFmpeg processes (default: 4)
+  --resolution          Video resolution: 720, 1080 (default: 720)
+  --audio-type          Audio: sub or dub (default: sub)
+  --season              Season number (default: 1)
 ```
 
 ## How It Works
 
-1. You provide a URL with the **first episode** (e.g., `?ep=13793`)
-2. The tool uses the sequential pattern to generate all episode URLs:
-   - EP1: `?ep=13793`
-   - EP2: `?ep=13794`
-   - EP3: `?ep=13795`
-   - etc.
-3. Saves the list to CSV
-4. Downloads in parallel using your yt-dlp command:
-   ```
-   yt-dlp -S "res:720" -f b[format_id*=sub] --write-subs --sub-lang en --convert-subs srt [URL]
-   ```
-5. Embeds subtitles with FFmpeg (default disposition so they play automatically)
-6. Removes the separate .srt files
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     PARALLEL PIPELINE                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  SCRAPER              DOWNLOADERS           EMBEDDERS        │
+│  ───────              ───────────           ─────────        │
+│                                                              │
+│  EP1 found ────────▶  [Download Queue] ──▶ [Embed Queue]    │
+│  EP2 found ────────▶       ▼                   ▼            │
+│  EP3 found ────────▶    Worker 1 ─────────▶ Worker 1        │
+│  ...                    Worker 2 ─────────▶ Worker 2        │
+│                                                              │
+│  (scraping URLs)     (yt-dlp downloads)   (FFmpeg embed)    │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **Scrape** - Fetches episode URLs from anime page (handles non-sequential IDs)
+2. **Queue** - Each URL is immediately added to download queue
+3. **Download** - Parallel yt-dlp workers download videos + subtitles
+4. **Embed** - Parallel FFmpeg workers embed subtitles into video
+5. **Cleanup** - Removes separate .srt files after embedding
+
+## Project Structure
+
+```
+HiAnime-Downloader/
+├── main.py              # Entry point
+├── config.py            # Settings from .env
+├── .env                 # Your configuration
+├── .env.example         # Example configuration
+├── requirements.txt     # Python dependencies
+│
+├── extractors/          # Site extractors
+│   ├── __init__.py
+│   └── hianime.py       # HiAnime scraper
+│
+└── tools/               # Utilities
+    ├── __init__.py
+    ├── functions.py     # Helper functions
+    └── logger.py        # yt-dlp logger
+```
+
+## Configuration (.env)
+
+```bash
+# Anime URL (optional)
+ANIME_URL=https://hianime.to/watch/bleach-806
+
+# Multiple URLs (queue mode)
+ANIME_URLS=url1,url2,url3
+
+# Workers
+DOWNLOAD_WORKERS=2
+EMBED_WORKERS=4
+
+# Video settings
+RESOLUTION=720
+AUDIO_TYPE=sub          # sub or dub
+SUBTITLE_LANG=en
+
+# Behavior
+DOWNLOAD_ALL=true       # Download all episodes
+VERBOSE=true            # Show yt-dlp output
+DEFAULT_SEASON=0        # 0 = prompt user
+
+# Rate limiting
+DOWNLOAD_DELAY=2        # Seconds between downloads
+```
 
 ## Output
 
 ```
 output/
-└── Anime Name/
-    ├── Anime Name_episodes.csv
-    ├── Anime Name - EP01.mp4
-    ├── Anime Name - EP02.mp4
+└── Bleach (Sub)/
+    ├── Bleach_episodes.csv
+    ├── Bleach_metadata.json
+    ├── Bleach - S01E01.mkv
+    ├── Bleach - S01E02.mkv
     └── ...
 ```
 
-## Configuration
+## Requirements
 
-Default settings (in main.py):
-- `MAX_DOWNLOAD_WORKERS = 6` - concurrent yt-dlp processes
-- `MAX_EMBED_WORKERS = 4` - concurrent FFmpeg processes
-- Resolution: 720p
-- Format: subbed version
-- Output: MP4 (falls back to MKV if needed)
+- Python 3.8+
+- yt-dlp with [hianime plugin](https://github.com/pratikpatel8982/yt-dlp-hianime)
+- FFmpeg (must be in PATH)
 
 ## Notes
 
-- The `?ep=` IDs are sequential for most anime on hianime
-- Subtitles are embedded with `disposition:default` so they auto-play
-- If MP4 subtitle embedding fails, it falls back to MKV format
+- Episode IDs are scraped from the page, not generated sequentially
+- Subtitles are embedded with `default+forced` disposition (auto-play)
+- Falls back to MKV if MP4 subtitle embedding fails
+- Use `--fetch-only` to just get episode URLs without downloading

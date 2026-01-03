@@ -1,15 +1,11 @@
-# Parallel Anime Downloader Dependencies
-
-# Web scraping
+# Core dependencies
 beautifulsoup4>=4.13.4
 requests>=2.32.3
-
-# CLI colors
 colorama>=0.4.6
-
-# Environment variables
 python-dotenv>=1.0.0
 
-# Note: The following must be installed separately:
-# - yt-dlp with hianime plugin (pip install yt-dlp)
-# - ffmpeg (system package, must be in PATH)
+# Selenium fallback (for difficult pages or m3u8 capture)
+selenium>=4.15.0
+selenium-wire>=5.1.0
+selenium-stealth>=1.0.6
+langdetect>=1.0.9
