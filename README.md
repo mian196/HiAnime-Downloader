@@ -18,7 +18,7 @@ winget install Gyan.FFmpeg
 
 ### Step 3: Install yt-dlp
 ```bash
-pip install yt-dlp
+python3 -m pip install -U "yt-dlp[default]"
 ```
 
 ### Step 4: Install yt-dlp Hianime Plugin
