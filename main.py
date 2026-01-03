@@ -44,6 +44,8 @@ RESOLUTION = os.getenv('RESOLUTION', '720')
 SUBTITLE_LANG = os.getenv('SUBTITLE_LANG', 'en')
 DOWNLOAD_TIMEOUT = int(os.getenv('DOWNLOAD_TIMEOUT', 3600))
 EMBED_TIMEOUT = int(os.getenv('EMBED_TIMEOUT', 600))
+DEFAULT_ANIME_URL = os.getenv('ANIME_URL', '')
+DOWNLOAD_DELAY = float(os.getenv('DOWNLOAD_DELAY', 2))  # Delay between starting downloads (rate limit protection)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11",
@@ -56,6 +58,8 @@ HEADERS = {
 shutdown_event = threading.Event()
 active_processes: List[subprocess.Popen] = []
 processes_lock = threading.Lock()
+download_throttle_lock = threading.Lock()
+last_download_time = 0.0
 
 
 @dataclass
@@ -100,12 +104,48 @@ def run_subprocess(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
     """Run subprocess with tracking for graceful shutdown."""
     if shutdown_event.is_set():
         raise InterruptedError("Shutdown requested")
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    # On Windows, use CREATE_NEW_PROCESS_GROUP for proper termination
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creationflags
+    )
     with processes_lock:
         active_processes.append(proc)
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+        # Poll with short intervals to check shutdown_event
+        start_time = time.time()
+
+        while True:
+            # Check for shutdown
+            if shutdown_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except:
+                    proc.kill()
+                raise InterruptedError("Shutdown requested")
+
+            # Check if process finished
+            retcode = proc.poll()
+            if retcode is not None:
+                # Process finished, read remaining output
+                stdout, stderr = proc.communicate()
+                return subprocess.CompletedProcess(cmd, retcode, stdout, stderr)
+
+            # Check timeout
+            if time.time() - start_time > timeout:
+                proc.kill()
+                proc.wait()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
+            # Short sleep to avoid busy-waiting
+            time.sleep(0.5)
+
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
@@ -258,6 +298,8 @@ def save_to_csv(episodes: List[Episode], csv_path: str):
 
 def download_episode(episode: Episode, output_dir: str) -> Episode:
     """Download a single episode using yt-dlp."""
+    global last_download_time
+
     if shutdown_event.is_set():
         episode.status = "cancelled"
         return episode
@@ -272,6 +314,13 @@ def download_episode(episode: Episode, output_dir: str) -> Episode:
             episode.final_path = existing_file
             episode.status = "skipped"
             return episode
+
+    # Throttle downloads to avoid rate limiting
+    with download_throttle_lock:
+        elapsed = time.time() - last_download_time
+        if elapsed < DOWNLOAD_DELAY:
+            time.sleep(DOWNLOAD_DELAY - elapsed)
+        last_download_time = time.time()
 
     try:
         episode.status = "downloading"
@@ -456,7 +505,9 @@ def run_pipeline(episodes: List[Episode], output_dir: str, download_workers: int
 
     def print_stats():
         with stats_lock:
-            print(f"\n{Fore.CYAN}Progress: Downloaded {stats['downloaded']}/{stats['total']} | "
+            # Skipped episodes count as "done" for progress purposes
+            done = stats['downloaded'] + stats['skipped']
+            print(f"\n{Fore.CYAN}Progress: Downloaded {done}/{stats['total']} | "
                   f"Embedded {stats['embedded']}/{stats['total']} | Skipped {stats['skipped']} | Failed {stats['failed']}{Style.RESET_ALL}\n")
 
     # Add all episodes to download queue
@@ -556,9 +607,12 @@ def main():
     parser.add_argument('--csv-only', action='store_true', help='Only generate CSV, no download')
     args = parser.parse_args()
 
-    # Get URL
+    # Get URL (priority: CLI arg > env var > user input)
     if args.url:
         url = args.url
+    elif DEFAULT_ANIME_URL:
+        url = DEFAULT_ANIME_URL
+        print_info(f"Using URL from .env: {url}")
     else:
         url = input("Enter anime URL (e.g., https://hianime.to/watch/bleach-806?ep=13793): ").strip()
 
