@@ -46,6 +46,9 @@ DOWNLOAD_TIMEOUT = int(os.getenv('DOWNLOAD_TIMEOUT', 3600))
 EMBED_TIMEOUT = int(os.getenv('EMBED_TIMEOUT', 600))
 DEFAULT_ANIME_URL = os.getenv('ANIME_URL', '')
 DOWNLOAD_DELAY = float(os.getenv('DOWNLOAD_DELAY', 2))  # Delay between starting downloads (rate limit protection)
+AUDIO_TYPE = os.getenv('AUDIO_TYPE', 'sub')  # 'sub' for Japanese audio, 'dub' for English audio
+DOWNLOAD_ALL = os.getenv('DOWNLOAD_ALL', 'true').lower() in ('true', '1', 'yes')  # Download all episodes by default
+VERBOSE = os.getenv('VERBOSE', 'true').lower() in ('true', '1', 'yes')  # Show yt-dlp output (true) or suppress (false)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11",
@@ -60,6 +63,7 @@ active_processes: List[subprocess.Popen] = []
 processes_lock = threading.Lock()
 download_throttle_lock = threading.Lock()
 last_download_time = 0.0
+
 
 
 @dataclass
@@ -100,13 +104,16 @@ def signal_handler(signum, frame):
     sys.exit(1)
 
 
-def run_subprocess(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
+print_lock = threading.Lock()
+
+def run_subprocess(cmd: List[str], timeout: int, prefix: str = "") -> subprocess.CompletedProcess:
     """Run subprocess with tracking for graceful shutdown."""
     if shutdown_event.is_set():
         raise InterruptedError("Shutdown requested")
 
     # On Windows, use CREATE_NEW_PROCESS_GROUP for proper termination
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -114,8 +121,43 @@ def run_subprocess(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
         text=True,
         creationflags=creationflags
     )
+
     with processes_lock:
         active_processes.append(proc)
+
+    stderr_lines = []
+    stdout_lines = []
+
+    def read_output():
+        """Read stdout/stderr and optionally print with prefix."""
+        try:
+            # Read stderr (where yt-dlp outputs progress)
+            if proc.stderr:
+                for line in proc.stderr:
+                    stderr_lines.append(line)
+                    if VERBOSE and prefix and line.strip():
+                        # Only print download progress lines, skip noise
+                        if any(x in line for x in ['[download]', '[hlsnative]', '[info]', 'Destination:', 'fragments:']):
+                            with print_lock:
+                                print(f"{Fore.YELLOW}[{prefix}]{Style.RESET_ALL} {line.rstrip()}")
+        except:
+            pass
+
+    def read_stdout():
+        """Read stdout."""
+        try:
+            if proc.stdout:
+                for line in proc.stdout:
+                    stdout_lines.append(line)
+        except:
+            pass
+
+    # Start output reader threads
+    stderr_thread = threading.Thread(target=read_output, daemon=True)
+    stdout_thread = threading.Thread(target=read_stdout, daemon=True)
+    stderr_thread.start()
+    stdout_thread.start()
+
     try:
         # Poll with short intervals to check shutdown_event
         start_time = time.time()
@@ -133,8 +175,11 @@ def run_subprocess(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
             # Check if process finished
             retcode = proc.poll()
             if retcode is not None:
-                # Process finished, read remaining output
-                stdout, stderr = proc.communicate()
+                # Wait for output threads to finish
+                stderr_thread.join(timeout=2)
+                stdout_thread.join(timeout=2)
+                stdout = ''.join(stdout_lines)
+                stderr = ''.join(stderr_lines)
                 return subprocess.CompletedProcess(cmd, retcode, stdout, stderr)
 
             # Check timeout
@@ -328,10 +373,12 @@ def download_episode(episode: Episode, output_dir: str) -> Episode:
 
         print_info(f"Downloading EP{episode.number:02d}: {episode.title}")
 
+        # Format: sub_720p, sub_1080p, dub_720p, etc.
+        # Try exact format first, then fallback to best available
+        format_id = f'{AUDIO_TYPE}_{RESOLUTION}p'
         cmd = [
             'yt-dlp',
-            '-S', f'res:{RESOLUTION}',
-            '-f', 'b[format_id*=sub]',
+            '-f', format_id,
             '--write-subs',
             '--sub-lang', SUBTITLE_LANG,
             '--convert-subs', 'srt',
@@ -342,13 +389,14 @@ def download_episode(episode: Episode, output_dir: str) -> Episode:
             episode.url
         ]
 
-        result = run_subprocess(cmd, DOWNLOAD_TIMEOUT)
+        result = run_subprocess(cmd, DOWNLOAD_TIMEOUT, prefix=f"EP{episode.number:02d}")
 
         if result.returncode != 0:
-            # Try fallback without format filter
-            print_warning(f"EP{episode.number:02d}: Retrying without format filter...")
+            # Fallback: try any format of same type sorted by resolution
+            print_warning(f"EP{episode.number:02d}: Retrying with best available {AUDIO_TYPE} format...")
             cmd_fallback = [
                 'yt-dlp',
+                '-f', f'bv*[format_id^={AUDIO_TYPE}]+ba/b[format_id^={AUDIO_TYPE}]/b',
                 '-S', f'res:{RESOLUTION}',
                 '--write-subs',
                 '--sub-lang', SUBTITLE_LANG,
@@ -358,7 +406,7 @@ def download_episode(episode: Episode, output_dir: str) -> Episode:
                 '--retries', '10',
                 episode.url
             ]
-            result = run_subprocess(cmd_fallback, DOWNLOAD_TIMEOUT)
+            result = run_subprocess(cmd_fallback, DOWNLOAD_TIMEOUT, prefix=f"EP{episode.number:02d}")
 
         if result.returncode == 0 and os.path.exists(video_path):
             episode.video_path = video_path
@@ -639,8 +687,13 @@ def main():
 
     # Get episode range
     print()
-    start_ep = get_int_input("Start episode number: ", 1, max(total_eps, 9999))
-    end_ep = get_int_input("End episode number: ", start_ep, max(total_eps, 9999))
+    if DOWNLOAD_ALL:
+        start_ep = 1
+        end_ep = total_eps if total_eps > 0 else 9999
+        print_info(f"DOWNLOAD_ALL enabled - downloading all {total_eps} episodes")
+    else:
+        start_ep = get_int_input("Start episode number: ", 1, max(total_eps, 9999))
+        end_ep = get_int_input("End episode number: ", start_ep, max(total_eps, 9999))
 
     num_episodes = end_ep - start_ep + 1
     print(f"\nWill download {num_episodes} episodes (EP{start_ep:02d} - EP{end_ep:02d})")
