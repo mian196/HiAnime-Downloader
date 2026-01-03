@@ -772,40 +772,23 @@ def main():
     # ==========================================================================
     extractor = HianimeExtractor({'subtitle_lang': SUBTITLE_LANG, 'no_subtitles': NO_SUBTITLES})
 
-    try:
-        # Get anime
-        anime = None
-        if args.search:
-            anime = extractor.select_anime_interactive(args.search)
-        elif args.url:
-            anime = extractor.get_anime_from_url(args.url)
-        elif ANIME_URL_QUEUE:
-            print_info(f"Found {len(ANIME_URL_QUEUE)} URLs in queue")
-            for i, url in enumerate(ANIME_URL_QUEUE, 1):
-                print(f"  {i}. {url}")
-            if get_confirmation("\nProcess first URL? (y/n): "):
-                anime = extractor.get_anime_from_url(ANIME_URL_QUEUE[0])
-        else:
-            print(f"{Fore.CYAN}1. Search anime{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}2. Enter URL{Style.RESET_ALL}")
-            choice = get_int_in_range("\nSelect: ", 1, 2)
-            if choice == 1:
-                anime = extractor.select_anime_interactive()
-            else:
-                url = input("Enter URL: ").strip()
-                anime = extractor.get_anime_from_url(url) if url else None
+    def process_single_anime(anime_url: str, is_queue: bool = False, queue_index: int = 0, queue_total: int = 0):
+        """Process a single anime URL. Returns True if successful."""
+        anime = extractor.get_anime_from_url(anime_url)
 
         if not anime:
-            print_error("No anime selected")
-            return
+            print_error(f"Failed to get anime info from: {anime_url}")
+            return False
 
         # Show anime info
-        print(f"\n{Fore.GREEN}Anime: {anime.name}{Style.RESET_ALL}")
+        if is_queue:
+            print(f"\n{Fore.CYAN}[{queue_index}/{queue_total}]{Style.RESET_ALL} {Fore.GREEN}Anime: {anime.name}{Style.RESET_ALL}")
+        else:
+            print(f"\n{Fore.GREEN}Anime: {anime.name}{Style.RESET_ALL}")
         print(f"Sub: {anime.sub_episodes} | Dub: {anime.dub_episodes}")
 
         # Select sub/dub - use AUDIO_TYPE from config if available
         if AUDIO_TYPE in ('sub', 'dub'):
-            # Check if the requested type is available
             if AUDIO_TYPE == 'sub' and anime.sub_episodes > 0:
                 anime.download_type = 'sub'
                 print_info(f"Using audio type from config: sub")
@@ -820,9 +803,8 @@ def main():
                 print_warning(f"Requested '{AUDIO_TYPE}' not available, falling back to dub")
             else:
                 print_error("No episodes available")
-                return
+                return False
         else:
-            # Prompt user if AUDIO_TYPE not set
             anime.download_type = extractor.select_download_type(anime)
 
         anime.season_number = args.season
@@ -845,12 +827,11 @@ def main():
             if episodes:
                 print_success(f"Fetched {len(episodes)} episodes!")
                 print_success(f"CSV saved: {csv_path}")
-                print_info("Use --from-csv to download later.")
             else:
                 print_error("Failed to fetch episodes")
-            return
+            return True
 
-        # Otherwise, run parallel scrape + download
+        # Show summary
         print(f"\n{Fore.YELLOW}Summary:{Style.RESET_ALL}")
         print(f"  Anime: {anime.name}")
         print(f"  Episodes: {start_ep} - {end_ep}")
@@ -858,9 +839,10 @@ def main():
         print(f"  Resolution: {args.resolution}p")
         print(f"  Mode: Parallel scrape + download")
 
-        if not get_confirmation("\nStart? (y/n): "):
+        # Only prompt if not in queue mode (queue already confirmed at start)
+        if not is_queue and not get_confirmation("\nStart? (y/n): "):
             print_info("Cancelled.")
-            return
+            return False
 
         start_time = time.time()
 
@@ -884,6 +866,75 @@ def main():
         print(f"Failed: {stats['failed']}")
         print(f"Time: {elapsed/60:.1f} min")
         print(f"Output: {output_dir}")
+
+        return True
+
+    try:
+        # Determine which anime to process
+        if args.search:
+            anime = extractor.select_anime_interactive(args.search)
+            if anime:
+                process_single_anime(anime.url)
+        elif args.url:
+            process_single_anime(args.url)
+        elif ANIME_URL_QUEUE:
+            # Queue mode - process all URLs in sequence
+            queue_total = len(ANIME_URL_QUEUE)
+            print_info(f"Found {queue_total} URLs in queue")
+            for i, url in enumerate(ANIME_URL_QUEUE, 1):
+                print(f"  {i}. {url}")
+
+            if not get_confirmation(f"\nProcess all {queue_total} URLs? (y/n): "):
+                print_info("Cancelled.")
+                return
+
+            # Process each URL in the queue
+            success_count = 0
+            fail_count = 0
+            for i, url in enumerate(ANIME_URL_QUEUE, 1):
+                if shutdown_event.is_set():
+                    print_warning("Shutdown requested, stopping queue processing")
+                    break
+
+                print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}  Processing queue item {i}/{queue_total}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+                print(f"URL: {url}")
+
+                try:
+                    if process_single_anime(url, is_queue=True, queue_index=i, queue_total=queue_total):
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                except Exception as e:
+                    print_error(f"Error processing {url}: {e}")
+                    fail_count += 1
+
+                # Small delay between anime in queue
+                if i < queue_total and not shutdown_event.is_set():
+                    print_info("Moving to next anime in 3 seconds...")
+                    time.sleep(3)
+
+            # Queue summary
+            print(f"\n{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}  Queue Complete!{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+            print(f"Total: {queue_total}")
+            print(f"Success: {success_count}")
+            print(f"Failed: {fail_count}")
+        else:
+            # Interactive mode
+            print(f"{Fore.CYAN}1. Search anime{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}2. Enter URL{Style.RESET_ALL}")
+            choice = get_int_in_range("\nSelect: ", 1, 2)
+            if choice == 1:
+                anime = extractor.select_anime_interactive()
+                if anime:
+                    process_single_anime(anime.url)
+            else:
+                url = input("Enter URL: ").strip()
+                if url:
+                    process_single_anime(url)
 
     finally:
         extractor.cleanup()
