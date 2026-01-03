@@ -62,15 +62,55 @@ except ImportError:
 @dataclass
 class Anime:
     """Anime metadata."""
-    name: str
+    name: str  # Full title: "Bleach Thousand Year Blood War The Conflict"
     url: str
     sub_episodes: int
     dub_episodes: int
+    short_name: str = ""  # Short name: "Bleach" (extracted from URL slug)
     download_type: str = "sub"  # 'sub' or 'dub'
     season_number: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def format_filename(self, ep_num: int, ep_title: str = "", fmt: str = "standard") -> str:
+        """
+        Generate filename based on format preference.
+
+        Args:
+            ep_num: Episode number
+            ep_title: Episode title (optional)
+            fmt: Format type - 'full', 'standard', 'short', 'season', 'episode'
+
+        Returns:
+            Formatted filename (without extension)
+        """
+        season_ep = f"S{self.season_number:02d}E{ep_num:02d}"
+
+        if fmt == "episode":
+            # E02
+            return f"E{ep_num:02d}"
+
+        elif fmt == "season":
+            # S01E02
+            return season_ep
+
+        elif fmt == "short":
+            # Bleach - S01E02
+            name = self.short_name if self.short_name else self.name.split()[0]
+            return f"{name} - {season_ep}"
+
+        elif fmt == "full":
+            # Bleach TYBW The Conflict - S01E02 - Kill The King
+            base = f"{self.name} - {season_ep}"
+            if ep_title and ep_title != f"Episode {ep_num}":
+                safe_title = ep_title[:50]  # Limit title length
+                return f"{base} - {safe_title}"
+            return base
+
+        else:  # 'standard' or default
+            # Bleach TYBW The Conflict - S01E02
+            return f"{self.name} - {season_ep}"
 
 
 @dataclass
@@ -221,11 +261,21 @@ class HianimeExtractor:
                         except ValueError:
                             pass
 
+                    # Extract short name from URL slug
+                    import re
+                    slug_match = re.search(r'/([^/]+?)(?:-\d+)?$', anime_url)
+                    short_name = ""
+                    if slug_match:
+                        slug = slug_match.group(1)
+                        first_word = slug.split('-')[0]
+                        short_name = sanitize_filename(first_word.title())
+
                     anime_list.append(Anime(
                         name=name,
                         url=anime_url,
                         sub_episodes=sub_eps,
                         dub_episodes=dub_eps,
+                        short_name=short_name,
                     ))
                 except Exception as e:
                     continue
@@ -344,11 +394,23 @@ class HianimeExtractor:
                 # Convert info URL to watch URL
                 base_url = base_url.replace('hianime.to/', 'hianime.to/watch/')
 
+            # Extract short name from URL slug
+            # e.g., "bleach-thousand-year-blood-war-the-conflict-19322" -> "Bleach"
+            import re
+            slug_match = re.search(r'/watch/([^/]+?)(?:-\d+)?$', base_url)
+            short_name = ""
+            if slug_match:
+                slug = slug_match.group(1)
+                # Get first word/segment of the slug as short name
+                first_word = slug.split('-')[0]
+                short_name = sanitize_filename(first_word.title())
+
             return Anime(
                 name=sanitize_filename(name),
                 url=base_url,
                 sub_episodes=sub_eps,
                 dub_episodes=dub_eps,
+                short_name=short_name,
             )
 
         except Exception as e:
@@ -751,6 +813,7 @@ class HianimeExtractor:
         anime: Anime,
         start_ep: int,
         end_ep: int,
+        filename_format: str = "standard",
     ) -> List[Episode]:
         """
         Build list of Episode objects with URLs scraped from page.
@@ -759,6 +822,7 @@ class HianimeExtractor:
             anime: Anime object
             start_ep: Starting episode number
             end_ep: Ending episode number
+            filename_format: Format type - 'full', 'standard', 'short', 'season', 'episode'
 
         Returns:
             List of Episode objects
@@ -769,12 +833,9 @@ class HianimeExtractor:
 
         episodes = []
         for ep_num, ep_url, ep_title in scraped:
-            # Build filename with season/episode format
-            filename = f"{anime.name} - S{anime.season_number:02d}E{ep_num:02d}"
-            if ep_title and ep_title != f"Episode {ep_num}":
-                # Add title if it's meaningful
-                safe_title = sanitize_filename(ep_title)[:50]
-                filename = f"{filename} - {safe_title}"
+            # Use the new format_filename method
+            filename = anime.format_filename(ep_num, ep_title, filename_format)
+            filename = sanitize_filename(filename)
 
             episodes.append(Episode(
                 number=ep_num,

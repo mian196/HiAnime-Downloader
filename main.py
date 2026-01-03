@@ -47,6 +47,7 @@ from config import (
     VERBOSE,
     NO_SUBTITLES,
     DEFAULT_SEASON,
+    FILENAME_FORMAT,
     ANIME_URL_QUEUE,
 )
 from extractors import HianimeExtractor
@@ -55,6 +56,7 @@ from tools.functions import (
     get_confirmation,
     get_int_in_range,
     safe_remove,
+    sanitize_filename,
     print_info,
     print_success,
     print_error,
@@ -419,7 +421,7 @@ def fetch_anime_to_csv(
     Fetch episode URLs and save to CSV.
     Returns: (episodes_list, csv_path)
     """
-    episodes = extractor.build_episode_list(anime, start_ep, end_ep)
+    episodes = extractor.build_episode_list(anime, start_ep, end_ep, filename_format=FILENAME_FORMAT)
     if not episodes:
         return [], None
 
@@ -550,7 +552,9 @@ def scrape_and_download_parallel(
                 if shutdown_event.is_set():
                     break
 
-                filename = f"{anime.name} - S{anime.season_number:02d}E{ep_num:02d}"
+                # Use the format_filename method based on config
+                filename = anime.format_filename(ep_num, ep_title, FILENAME_FORMAT)
+                filename = sanitize_filename(filename)
                 episode = Episode(
                     number=ep_num,
                     url=ep_url,

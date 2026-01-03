@@ -60,9 +60,16 @@ VERBOSE = os.getenv('VERBOSE', 'true').lower() in ('true', '1', 'yes')
 # Skip subtitle download
 NO_SUBTITLES = os.getenv('NO_SUBTITLES', 'false').lower() in ('true', '1', 'yes')
 
-
 # Default season number (0 = prompt user)
 DEFAULT_SEASON = int(os.getenv('DEFAULT_SEASON', 0))
+
+# Filename format options:
+# 'full'     = Title + Season + Episode + Episode Title: "Bleach TYBW The Conflict - S01E02 - Kill The King.mkv"
+# 'standard' = Title + Season + Episode (no title):      "Bleach TYBW The Conflict - S01E02.mkv"
+# 'short'    = First word + Season + Episode:            "Bleach - S01E02.mkv"
+# 'season'   = Season + Episode only:                    "S01E02.mkv"
+# 'episode'  = Episode only:                             "E02.mkv"
+FILENAME_FORMAT = os.getenv('FILENAME_FORMAT', 'standard').lower()
 
 
 # =============================================================================
