@@ -350,13 +350,13 @@ def download_from_episodes(
     for ep in episodes:
         download_queue.put(ep)
 
-    def dl_worker():
+    def dl_worker(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = download_queue.get(timeout=1)
             except Empty:
                 continue
-            result = download_episode(ep, output_dir, audio_type, resolution)
+            result = download_episode(ep, output_dir, audio_type, resolution, worker_id=worker_id)
             with stats_lock:
                 if result.status == "downloaded":
                     stats['downloaded'] += 1
@@ -368,7 +368,7 @@ def download_from_episodes(
             print_stats()
             download_queue.task_done()
 
-    def embed_worker_fn():
+    def embed_worker_fn(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = embed_queue.get(timeout=1)
@@ -376,7 +376,7 @@ def download_from_episodes(
                 if download_queue.empty() and stats['downloaded'] + stats['failed'] + stats['skipped'] >= stats['total']:
                     break
                 continue
-            result = embed_subtitle(ep)
+            result = embed_subtitle(ep, worker_id=worker_id)
             with stats_lock:
                 if result.status == "completed":
                     stats['embedded'] += 1
@@ -384,12 +384,12 @@ def download_from_episodes(
             embed_queue.task_done()
 
     threads = []
-    for _ in range(download_workers):
-        t = threading.Thread(target=dl_worker, daemon=True)
+    for i in range(download_workers):
+        t = threading.Thread(target=dl_worker, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
-    for _ in range(embed_workers):
-        t = threading.Thread(target=embed_worker_fn, daemon=True)
+    for i in range(embed_workers):
+        t = threading.Thread(target=embed_worker_fn, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
 
@@ -581,7 +581,7 @@ def scrape_and_download_parallel(
     # -------------------------------------------------------------------------
     # DOWNLOAD WORKERS
     # -------------------------------------------------------------------------
-    def dl_worker():
+    def dl_worker(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = download_queue.get(timeout=1)
@@ -591,7 +591,7 @@ def scrape_and_download_parallel(
                     break
                 continue
 
-            result = download_episode(ep, output_dir, audio_type, resolution)
+            result = download_episode(ep, output_dir, audio_type, resolution, worker_id=worker_id)
 
             with stats_lock:
                 if result.status == "downloaded":
@@ -609,7 +609,7 @@ def scrape_and_download_parallel(
     # -------------------------------------------------------------------------
     # EMBED WORKERS
     # -------------------------------------------------------------------------
-    def embed_worker_fn():
+    def embed_worker_fn(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = embed_queue.get(timeout=1)
@@ -620,7 +620,7 @@ def scrape_and_download_parallel(
                         break
                 continue
 
-            result = embed_subtitle(ep)
+            result = embed_subtitle(ep, worker_id=worker_id)
 
             with stats_lock:
                 if result.status == "completed":
@@ -640,14 +640,14 @@ def scrape_and_download_parallel(
     threads.append(scraper)
 
     # Start download workers
-    for _ in range(download_workers):
-        t = threading.Thread(target=dl_worker, daemon=True)
+    for i in range(download_workers):
+        t = threading.Thread(target=dl_worker, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
 
     # Start embed workers
-    for _ in range(embed_workers):
-        t = threading.Thread(target=embed_worker_fn, daemon=True)
+    for i in range(embed_workers):
+        t = threading.Thread(target=embed_worker_fn, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
 
