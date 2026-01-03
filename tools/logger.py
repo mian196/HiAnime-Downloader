@@ -1,16 +1,11 @@
-"""Custom logger for yt-dlp output formatting."""
-
 from colorama import Fore, Style
 
 
 class YTDLogger:
-    """Custom logger for yt-dlp to format output nicely."""
-
     def __init__(self, prefix: str = ""):
         self.prefix = prefix
 
     def debug(self, msg: str):
-        # Filter out noisy debug messages
         if msg.startswith('[debug]'):
             return
         if any(x in msg for x in ['[download]', '[hlsnative]', '[info]', 'Destination:']):

@@ -1,24 +1,3 @@
-"""
-HiAnime Downloader - Parallel Anime Downloader for hianime.to
-
-Features:
-- Scraping and downloading happen IN PARALLEL
-- As soon as an episode URL is found, it starts downloading
-- No need to wait for all URLs to be scraped first
-
-Modes:
-1. FULL MODE: Scrape + Download simultaneously (default)
-2. FETCH ONLY: Just scrape URLs to CSV (--fetch-only)
-3. FROM CSV: Download from existing CSV (--from-csv)
-
-Usage:
-    python main.py                          # Interactive: scrape + download in parallel
-    python main.py -s "bleach"              # Search + scrape + download
-    python main.py -u "URL"                 # URL + scrape + download
-    python main.py --fetch-only             # Only scrape URLs to CSV (no download)
-    python main.py --from-csv "file.csv"   # Download from existing CSV file
-"""
-
 import os
 import sys
 import time
@@ -74,10 +53,6 @@ from tools.functions import (
 )
 
 
-# =============================================================================
-# GLOBAL STATE
-# =============================================================================
-
 shutdown_event = threading.Event()
 active_processes: List[subprocess.Popen] = []
 processes_lock = threading.Lock()
@@ -85,7 +60,6 @@ download_throttle_lock = threading.Lock()
 last_download_time = 0.0
 print_lock = threading.Lock()
 
-# Initialize logging system
 LOG_LEVEL_MAP = {
     'DEBUG': logging.DEBUG,
     'INFO': logging.INFO,
@@ -99,10 +73,6 @@ ThreadLogger.initialize(
 )
 
 
-# =============================================================================
-# SIGNAL HANDLER
-# =============================================================================
-
 def signal_handler(signum, frame):
     print_warning("\n\nShutting down...")
     shutdown_event.set()
@@ -115,10 +85,6 @@ def signal_handler(signum, frame):
         active_processes.clear()
     sys.exit(1)
 
-
-# =============================================================================
-# SUBPROCESS
-# =============================================================================
 
 def run_subprocess(cmd: List[str], timeout: int, prefix: str = "") -> subprocess.CompletedProcess:
     if shutdown_event.is_set():
@@ -174,12 +140,7 @@ def run_subprocess(cmd: List[str], timeout: int, prefix: str = "") -> subprocess
                 active_processes.remove(proc)
 
 
-# =============================================================================
-# CSV FUNCTIONS
-# =============================================================================
-
 def save_episodes_to_csv(episodes: List[Episode], csv_path: str):
-    """Save episode list to CSV file."""
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['Episode', 'URL', 'Title', 'Filename', 'Status'])
@@ -189,7 +150,6 @@ def save_episodes_to_csv(episodes: List[Episode], csv_path: str):
 
 
 def load_episodes_from_csv(csv_path: str) -> List[Episode]:
-    """Load episode list from CSV file."""
     episodes = []
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -205,14 +165,9 @@ def load_episodes_from_csv(csv_path: str) -> List[Episode]:
     return episodes
 
 
-# =============================================================================
-# DOWNLOAD WORKER
-# =============================================================================
-
 def download_episode(episode: Episode, output_dir: str, audio_type: str, resolution: str, worker_id: int = 0) -> Episode:
     global last_download_time
 
-    # Get thread-specific logger
     logger = get_worker_logger('download', worker_id) if worker_id > 0 else get_main_logger()
     worker_tag = f"W{worker_id}" if worker_id > 0 else ""
 
@@ -220,7 +175,6 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
         episode.status = "cancelled"
         return episode
 
-    # Skip if exists
     base_path = os.path.join(output_dir, episode.filename)
     for ext in ['.mkv', '.mp4']:
         if os.path.exists(base_path + ext):
@@ -229,7 +183,6 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
             episode.status = "skipped"
             return episode
 
-    # Throttle
     with download_throttle_lock:
         elapsed = time.time() - last_download_time
         if elapsed < DOWNLOAD_DELAY:
@@ -248,13 +201,11 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
             episode.url
         ]
 
-        # Pass worker tag for yt-dlp output
         yt_prefix = f"{worker_tag}:EP{episode.number:02d}" if worker_tag else f"EP{episode.number:02d}"
         result = run_subprocess(cmd, DOWNLOAD_TIMEOUT, prefix=yt_prefix)
 
         if result.returncode != 0:
             logger.warning(f"EP{episode.number:02d}: Primary format failed, trying fallback")
-            # Fallback
             cmd_fallback = [
                 'yt-dlp', '-f', f'bv*[format_id^={audio_type}]+ba/b[format_id^={audio_type}]/b',
                 '-S', f'res:{resolution}', '--write-subs', '--sub-lang', SUBTITLE_LANG,
@@ -284,12 +235,7 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
     return episode
 
 
-# =============================================================================
-# EMBED WORKER
-# =============================================================================
-
 def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
-    # Get thread-specific logger
     logger = get_worker_logger('embed', worker_id) if worker_id > 0 else get_main_logger()
 
     if shutdown_event.is_set() or episode.status != "downloaded" or not episode.video_path:
@@ -338,10 +284,6 @@ def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
     return episode
 
 
-# =============================================================================
-# DOWNLOAD PIPELINE (from episode list)
-# =============================================================================
-
 def download_from_episodes(
     episodes: List[Episode],
     output_dir: str,
@@ -350,7 +292,6 @@ def download_from_episodes(
     download_workers: int,
     embed_workers: int
 ) -> dict:
-    """Download and embed videos from a list of episodes."""
     os.makedirs(output_dir, exist_ok=True)
 
     main_logger = get_main_logger()
@@ -426,10 +367,6 @@ def download_from_episodes(
     return stats
 
 
-# =============================================================================
-# FETCH FUNCTION (scrape URLs → CSV)
-# =============================================================================
-
 def fetch_anime_to_csv(
     extractor: HianimeExtractor,
     anime: Anime,
@@ -437,10 +374,6 @@ def fetch_anime_to_csv(
     start_ep: int = 1,
     end_ep: int = 9999
 ) -> tuple:
-    """
-    Fetch episode URLs and save to CSV.
-    Returns: (episodes_list, csv_path)
-    """
     episodes = extractor.build_episode_list(anime, start_ep, end_ep, filename_format=FILENAME_FORMAT)
     if not episodes:
         return [], None
@@ -455,10 +388,6 @@ def fetch_anime_to_csv(
     return episodes, csv_path
 
 
-# =============================================================================
-# STREAMING SCRAPE + DOWNLOAD (parallel)
-# =============================================================================
-
 def scrape_and_download_parallel(
     extractor: HianimeExtractor,
     anime: Anime,
@@ -470,10 +399,6 @@ def scrape_and_download_parallel(
     download_workers: int,
     embed_workers: int
 ) -> dict:
-    """
-    Scrape episode URLs and download IN PARALLEL.
-    As soon as an episode URL is found, it's added to the download queue.
-    """
     import requests
     from bs4 import BeautifulSoup
     from tools.functions import sanitize_filename
@@ -482,10 +407,9 @@ def scrape_and_download_parallel(
 
     main_logger = get_main_logger()
 
-    # Queues
     download_queue = Queue()
     embed_queue = Queue()
-    all_episodes = []  # Collect all episodes for CSV
+    all_episodes = []
     episodes_lock = threading.Lock()
 
     stats = {'scraped': 0, 'downloaded': 0, 'embedded': 0, 'failed': 0, 'skipped': 0, 'total': end_ep - start_ep + 1}
@@ -501,15 +425,11 @@ def scrape_and_download_parallel(
                 f"Failed: {stats['failed']}"
             )
 
-    # -------------------------------------------------------------------------
-    # SCRAPER THREAD - scrapes URLs via AJAX API and feeds to download queue
-    # -------------------------------------------------------------------------
     def scraper_thread():
         import re
         logger = get_scraper_logger()
         base_url = anime.url.split('?')[0]
 
-        # Extract anime ID from URL (e.g., "bleach-thousand-year-blood-war-the-conflict-19322" -> "19322")
         match = re.search(r'-(\d+)$', base_url.rstrip('/'))
         if not match:
             logger.error("Could not extract anime ID from URL")
@@ -527,7 +447,6 @@ def scrape_and_download_parallel(
         }
 
         try:
-            # Fetch episodes via AJAX API
             logger.info("Fetching episodes from API...")
             api_url = f"https://hianime.to/ajax/v2/episode/list/{anime_id}"
             response = requests.get(api_url, headers=headers, timeout=30)
@@ -543,7 +462,6 @@ def scrape_and_download_parallel(
                 scrape_done.set()
                 return
 
-            # Parse the HTML from API response
             soup = BeautifulSoup(data['html'], "html.parser")
             ep_items = soup.find_all("a", attrs={"data-number": True})
 
@@ -552,7 +470,6 @@ def scrape_and_download_parallel(
                 scrape_done.set()
                 return
 
-            # Sort by episode number
             ep_data = []
             for item in ep_items:
                 try:
@@ -568,20 +485,16 @@ def scrape_and_download_parallel(
 
             ep_data.sort(key=lambda x: x[0])
 
-            # Update total count
             total_episodes = len(ep_data)
             with stats_lock:
                 stats['total'] = total_episodes
 
             logger.success(f"Found {total_episodes} episodes to process")
 
-            # Feed episodes to download queue one by one
             for ep_num, ep_url, ep_title in ep_data:
                 if shutdown_event.is_set():
                     break
 
-                # Use the format_filename method based on config
-                # Pass total_episodes so single-episode anime (movies/OVAs) skip numbering
                 filename = anime.format_filename(ep_num, ep_title, FILENAME_FORMAT, total_episodes)
                 filename = sanitize_filename(filename)
                 episode = Episode(
@@ -594,7 +507,6 @@ def scrape_and_download_parallel(
                 with episodes_lock:
                     all_episodes.append(episode)
 
-                # Add to download queue immediately
                 download_queue.put(episode)
 
                 with stats_lock:
@@ -603,7 +515,6 @@ def scrape_and_download_parallel(
                 logger.success(f"EP{ep_num:02d}: Scraped - {ep_title[:40]}...")
                 log_stats()
 
-                # Small delay to not overwhelm
                 time.sleep(0.1)
 
         except Exception as e:
@@ -612,15 +523,11 @@ def scrape_and_download_parallel(
             logger.info("Scraping complete")
             scrape_done.set()
 
-    # -------------------------------------------------------------------------
-    # DOWNLOAD WORKERS
-    # -------------------------------------------------------------------------
     def dl_worker(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = download_queue.get(timeout=1)
             except Empty:
-                # Check if scraping is done and queue is empty
                 if scrape_done.is_set() and download_queue.empty():
                     break
                 continue
@@ -633,22 +540,18 @@ def scrape_and_download_parallel(
                     embed_queue.put(result)
                 elif result.status == "skipped":
                     stats['skipped'] += 1
-                    stats['downloaded'] += 1  # Count as done
+                    stats['downloaded'] += 1
                 else:
                     stats['failed'] += 1
 
             log_stats()
             download_queue.task_done()
 
-    # -------------------------------------------------------------------------
-    # EMBED WORKERS
-    # -------------------------------------------------------------------------
     def embed_worker_fn(worker_id: int):
         while not stop_event.is_set():
             try:
                 ep = embed_queue.get(timeout=1)
             except Empty:
-                # Check if all downloads are done
                 with stats_lock:
                     if scrape_done.is_set() and stats['downloaded'] + stats['failed'] >= stats['scraped']:
                         break
@@ -663,39 +566,25 @@ def scrape_and_download_parallel(
             log_stats()
             embed_queue.task_done()
 
-    # -------------------------------------------------------------------------
-    # START ALL THREADS
-    # -------------------------------------------------------------------------
     threads = []
 
-    # Start scraper thread
     scraper = threading.Thread(target=scraper_thread, daemon=True)
     scraper.start()
     threads.append(scraper)
 
-    # Start download workers
     for i in range(download_workers):
         t = threading.Thread(target=dl_worker, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
 
-    # Start embed workers
     for i in range(embed_workers):
         t = threading.Thread(target=embed_worker_fn, args=(i + 1,), daemon=True)
         t.start()
         threads.append(t)
 
-    # -------------------------------------------------------------------------
-    # WAIT FOR COMPLETION
-    # -------------------------------------------------------------------------
     try:
-        # Wait for scraper to finish
         scraper.join()
-
-        # Wait for download queue to empty
         download_queue.join()
-
-        # Signal stop and wait for embed workers
         stop_event.set()
         for t in threads:
             t.join(timeout=5)
@@ -704,7 +593,6 @@ def scrape_and_download_parallel(
         main_logger.warning("Interrupted by user!")
         stop_event.set()
 
-    # Save CSV with all episodes
     csv_path = os.path.join(output_dir, f"{anime.name}_episodes.csv")
     with episodes_lock:
         save_episodes_to_csv(all_episodes, csv_path)
@@ -713,10 +601,6 @@ def scrape_and_download_parallel(
     print_success("All tasks completed!")
     return stats
 
-
-# =============================================================================
-# MAIN
-# =============================================================================
 
 def main():
     signal.signal(signal.SIGINT, signal_handler)
@@ -739,9 +623,6 @@ def main():
     parser.add_argument('--season', type=int, default=DEFAULT_SEASON if DEFAULT_SEASON > 0 else 1)
     args = parser.parse_args()
 
-    # ==========================================================================
-    # MODE 1: Download from existing CSV
-    # ==========================================================================
     if args.from_csv:
         print_info(f"Loading episodes from: {args.from_csv}")
         episodes = load_episodes_from_csv(args.from_csv)
@@ -750,7 +631,6 @@ def main():
             print_error("No episodes in CSV")
             return
 
-        # Determine output dir from CSV location
         output_dir = os.path.dirname(args.from_csv) or args.output
 
         print(f"\n{Fore.YELLOW}Downloading {len(episodes)} episodes{Style.RESET_ALL}")
@@ -769,27 +649,21 @@ def main():
         print(f"\n{Fore.GREEN}Done! Downloaded: {stats['downloaded']}, Embedded: {stats['embedded']}, Failed: {stats['failed']}{Style.RESET_ALL}")
         return
 
-    # ==========================================================================
-    # MODE 2: Fetch + Download (or Fetch only)
-    # ==========================================================================
     extractor = HianimeExtractor({'subtitle_lang': SUBTITLE_LANG, 'no_subtitles': NO_SUBTITLES})
 
     def process_single_anime(anime_url: str, is_queue: bool = False, queue_index: int = 0, queue_total: int = 0):
-        """Process a single anime URL. Returns True if successful."""
         anime = extractor.get_anime_from_url(anime_url)
 
         if not anime:
             print_error(f"Failed to get anime info from: {anime_url}")
             return False
 
-        # Show anime info
         if is_queue:
             print(f"\n{Fore.CYAN}[{queue_index}/{queue_total}]{Style.RESET_ALL} {Fore.GREEN}Anime: {anime.name}{Style.RESET_ALL}")
         else:
             print(f"\n{Fore.GREEN}Anime: {anime.name}{Style.RESET_ALL}")
         print(f"Sub: {anime.sub_episodes} | Dub: {anime.dub_episodes}")
 
-        # Select sub/dub - use AUDIO_TYPE from config if available
         if AUDIO_TYPE in ('sub', 'dub'):
             if AUDIO_TYPE == 'sub' and anime.sub_episodes > 0:
                 anime.download_type = 'sub'
@@ -811,7 +685,6 @@ def main():
 
         anime.season_number = args.season
 
-        # Get episode range
         max_eps = anime.sub_episodes if anime.download_type == 'sub' else anime.dub_episodes
         if DOWNLOAD_ALL:
             start_ep, end_ep = 1, max_eps or 9999
@@ -819,10 +692,8 @@ def main():
             start_ep = get_int_in_range("Start episode: ", 1, max_eps or 9999)
             end_ep = get_int_in_range("End episode: ", start_ep, max_eps or 9999)
 
-        # Create output dir
         output_dir = os.path.join(args.output, f"{anime.name} ({anime.download_type.title()})")
 
-        # If fetch-only mode, just scrape and save to CSV
         if args.fetch_only:
             print_info("Fetching episode URLs (fetch-only mode)...")
             episodes, csv_path = fetch_anime_to_csv(extractor, anime, output_dir, start_ep, end_ep)
@@ -833,7 +704,6 @@ def main():
                 print_error("Failed to fetch episodes")
             return True
 
-        # Show summary
         print(f"\n{Fore.YELLOW}Summary:{Style.RESET_ALL}")
         print(f"  Anime: {anime.name}")
         print(f"  Episodes: {start_ep} - {end_ep}")
@@ -841,14 +711,12 @@ def main():
         print(f"  Resolution: {args.resolution}p")
         print(f"  Mode: Parallel scrape + download")
 
-        # Only prompt if not in queue mode (queue already confirmed at start)
         if not is_queue and not get_confirmation("\nStart? (y/n): "):
             print_info("Cancelled.")
             return False
 
         start_time = time.time()
 
-        # Run parallel scrape + download
         stats = scrape_and_download_parallel(
             extractor, anime, output_dir,
             start_ep, end_ep,
@@ -872,7 +740,6 @@ def main():
         return True
 
     try:
-        # Determine which anime to process
         if args.search:
             anime = extractor.select_anime_interactive(args.search)
             if anime:
@@ -880,7 +747,6 @@ def main():
         elif args.url:
             process_single_anime(args.url)
         elif ANIME_URL_QUEUE:
-            # Queue mode - process all URLs in sequence
             queue_total = len(ANIME_URL_QUEUE)
             print_info(f"Found {queue_total} URLs in queue")
             for i, url in enumerate(ANIME_URL_QUEUE, 1):
@@ -890,7 +756,6 @@ def main():
                 print_info("Cancelled.")
                 return
 
-            # Process each URL in the queue
             success_count = 0
             fail_count = 0
             for i, url in enumerate(ANIME_URL_QUEUE, 1):
@@ -912,12 +777,10 @@ def main():
                     print_error(f"Error processing {url}: {e}")
                     fail_count += 1
 
-                # Small delay between anime in queue
                 if i < queue_total and not shutdown_event.is_set():
                     print_info("Moving to next anime in 3 seconds...")
                     time.sleep(3)
 
-            # Queue summary
             print(f"\n{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
             print(f"{Fore.GREEN}  Queue Complete!{Style.RESET_ALL}")
             print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
@@ -925,7 +788,6 @@ def main():
             print(f"Success: {success_count}")
             print(f"Failed: {fail_count}")
         else:
-            # Interactive mode
             print(f"{Fore.CYAN}1. Search anime{Style.RESET_ALL}")
             print(f"{Fore.CYAN}2. Enter URL{Style.RESET_ALL}")
             choice = get_int_in_range("\nSelect: ", 1, 2)

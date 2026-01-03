@@ -1,12 +1,9 @@
-"""Utility functions for the anime downloader."""
-
 import os
 import sys
 from colorama import Fore, Style
 
 
 def get_confirmation(prompt: str) -> bool:
-    """Get yes/no confirmation from user."""
     while True:
         resp = input(prompt).strip().lower()
         if resp in ('y', 'yes'):
@@ -17,7 +14,6 @@ def get_confirmation(prompt: str) -> bool:
 
 
 def get_int_in_range(prompt: str, min_val: int = 1, max_val: int = 9999) -> int:
-    """Get integer input from user within a range."""
     while True:
         try:
             val = int(input(prompt))
@@ -29,17 +25,14 @@ def get_int_in_range(prompt: str, min_val: int = 1, max_val: int = 9999) -> int:
 
 
 def sanitize_filename(name: str) -> str:
-    """Remove invalid filename characters."""
     invalid = '<>:"/\\|?*'
     for char in invalid:
         name = name.replace(char, '_')
-    # Also remove other problematic characters
     name = name.replace('[', '').replace(']', '')
     return name.strip()
 
 
 def safe_remove(path: str) -> bool:
-    """Safely remove a file, returning True if successful."""
     try:
         if os.path.exists(path):
             os.remove(path)
@@ -50,7 +43,6 @@ def safe_remove(path: str) -> bool:
 
 
 def clear_screen():
-    """Clear the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 

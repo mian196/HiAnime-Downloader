@@ -1,15 +1,3 @@
-"""
-HiAnime Extractor - Handles all interaction with hianime.to
-
-Features:
-- Anime search by name
-- Episode URL scraping (handles non-sequential IDs)
-- Sub/Dub selection
-- Server selection
-- Selenium fallback for difficult pages
-- Language detection for subtitles
-"""
-
 import json
 import os
 import sys
@@ -39,7 +27,6 @@ from tools.functions import (
 )
 from tools.logger import YTDLogger
 
-# Optional imports for Selenium fallback
 try:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.remote.webelement import WebElement
@@ -51,7 +38,6 @@ try:
 except ImportError:
     SELENIUM_AVAILABLE = False
 
-# Optional import for language detection
 try:
     from langdetect import detect as detect_lang
     LANGDETECT_AVAILABLE = True
@@ -61,66 +47,46 @@ except ImportError:
 
 @dataclass
 class Anime:
-    """Anime metadata."""
-    name: str  # Full title: "Bleach Thousand Year Blood War The Conflict"
+    name: str
     url: str
     sub_episodes: int
     dub_episodes: int
-    short_name: str = ""  # Short name: "Bleach" (extracted from URL slug)
-    download_type: str = "sub"  # 'sub' or 'dub'
+    short_name: str = ""
+    download_type: str = "sub"
     season_number: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     def format_filename(self, ep_num: int, ep_title: str = "", fmt: str = "standard", total_episodes: int = 0) -> str:
-        """
-        Generate filename based on format preference.
-
-        Args:
-            ep_num: Episode number
-            ep_title: Episode title (optional)
-            fmt: Format type - 'full', 'standard', 'short', 'season', 'episode'
-            total_episodes: Total number of episodes (if 1, skip episode numbering for movies/OVAs)
-
-        Returns:
-            Formatted filename (without extension)
-        """
-        # For single-episode anime (movies, OVAs, specials), just use the anime title
         if total_episodes == 1:
             return self.name
 
         season_ep = f"S{self.season_number:02d}E{ep_num:02d}"
 
         if fmt == "episode":
-            # E02
             return f"E{ep_num:02d}"
 
         elif fmt == "season":
-            # S01E02
             return season_ep
 
         elif fmt == "short":
-            # Bleach - S01E02
             name = self.short_name if self.short_name else self.name.split()[0]
             return f"{name} - {season_ep}"
 
         elif fmt == "full":
-            # Bleach TYBW The Conflict - S01E02 - Kill The King
             base = f"{self.name} - {season_ep}"
             if ep_title and ep_title != f"Episode {ep_num}":
-                safe_title = ep_title[:50]  # Limit title length
+                safe_title = ep_title[:50]
                 return f"{base} - {safe_title}"
             return base
 
-        else:  # 'standard' or default
-            # Bleach TYBW The Conflict - S01E02
+        else:
             return f"{self.name} - {season_ep}"
 
 
 @dataclass
 class Episode:
-    """Episode information."""
     number: int
     url: str
     title: str
@@ -144,17 +110,6 @@ class Episode:
 
 
 class HianimeExtractor:
-    """
-    Extractor for hianime.to anime content.
-
-    Handles:
-    - Searching for anime by name
-    - Fetching anime details from URL
-    - Scraping episode URLs (handles non-sequential IDs)
-    - Sub/Dub and server selection
-    - Selenium fallback for difficult pages
-    """
-
     URL = "https://hianime.to"
     ENCODING = "utf-8"
 
@@ -165,7 +120,6 @@ class HianimeExtractor:
         "Connection": "keep-alive",
     }
 
-    # Languages to filter out when looking for English subtitles
     OTHER_LANGS = [
         "ita", "jpn", "pol", "por", "ara", "chi", "cze", "dan", "dut", "fin",
         "fre", "ger", "gre", "heb", "hun", "ind", "kor", "nob", "rum", "rus",
@@ -173,24 +127,12 @@ class HianimeExtractor:
         "deu", "ell", "hin", "hrv", "msa", "may", "ron", "slk", "slo", "ukr",
     ]
 
-    # Bad characters for filenames
     BAD_TITLE_CHARS = ["-", ".", "/", "\\", "?", "%", "*", "<", ">", "|", '"', "[", "]", ":"]
 
-    # Selenium capture settings
     DOWNLOAD_ATTEMPT_CAP = 45
     DOWNLOAD_REFRESH = (15, 30)
 
     def __init__(self, config: dict = None):
-        """
-        Initialize the extractor.
-
-        Args:
-            config: Configuration dictionary with settings like:
-                - subtitle_lang: Language code for subtitles (default: 'en')
-                - no_subtitles: Skip subtitle download (default: False)
-                - server: Preferred server name (default: None)
-                - use_selenium: Force Selenium mode (default: False)
-        """
         self.config = config or {}
         self.subtitle_lang = self.config.get('subtitle_lang', 'en')
         self.no_subtitles = self.config.get('no_subtitles', False)
@@ -201,23 +143,9 @@ class HianimeExtractor:
         self.captured_video_urls = []
         self.captured_subtitle_urls = []
 
-        # Title translation table for filename sanitization
         self.title_trans = str.maketrans("", "", "".join(self.BAD_TITLE_CHARS))
 
-    # =========================================================================
-    # ANIME SEARCH
-    # =========================================================================
-
     def search_anime(self, query: str) -> List[Anime]:
-        """
-        Search for anime by name.
-
-        Args:
-            query: Search query string
-
-        Returns:
-            List of Anime objects matching the search
-        """
         print_info(f"Searching for: {query}")
 
         url = urljoin(self.URL, f"/search?keyword={query}")
@@ -239,16 +167,13 @@ class HianimeExtractor:
             anime_list = []
             for element in anime_elements:
                 try:
-                    # Get name
                     name_elem = element.find("h3", class_="film-name")
                     raw_name = name_elem.text if name_elem else "Unknown"
                     name = raw_name.translate(self.title_trans).strip()
 
-                    # Get URL
                     link_elem = element.find("a", class_="film-poster-ahref")
                     anime_url = urljoin(self.URL, link_elem["href"]) if link_elem else ""
 
-                    # Get episode counts
                     sub_eps = 0
                     dub_eps = 0
 
@@ -266,7 +191,6 @@ class HianimeExtractor:
                         except ValueError:
                             pass
 
-                    # Extract short name from URL slug
                     import re
                     slug_match = re.search(r'/([^/]+?)(?:-\d+)?$', anime_url)
                     short_name = ""
@@ -293,15 +217,6 @@ class HianimeExtractor:
             return []
 
     def select_anime_interactive(self, query: str = None) -> Optional[Anime]:
-        """
-        Interactive anime selection - search and let user choose.
-
-        Args:
-            query: Optional search query. If None, prompts user.
-
-        Returns:
-            Selected Anime or None if cancelled
-        """
         clear_screen()
         print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}  HiAnime Downloader - Search{Style.RESET_ALL}")
@@ -316,7 +231,6 @@ class HianimeExtractor:
         if not anime_list:
             return None
 
-        # Display results
         print(f"\n{Fore.GREEN}Search Results:{Style.RESET_ALL}\n")
         for i, anime in enumerate(anime_list, 1):
             sub_info = f"{Fore.YELLOW}{anime.sub_episodes}{Style.RESET_ALL} sub"
@@ -324,7 +238,6 @@ class HianimeExtractor:
             print(f"  {Fore.RED}{i:2}{Style.RESET_ALL}: {Fore.CYAN}{anime.name}{Style.RESET_ALL}")
             print(f"      Episodes: {sub_info} / {dub_info}")
 
-        # User selection
         selection = get_int_in_range(
             f"\n{Fore.CYAN}Select anime (1-{len(anime_list)}): {Style.RESET_ALL}",
             1,
@@ -333,32 +246,17 @@ class HianimeExtractor:
 
         return anime_list[selection - 1]
 
-    # =========================================================================
-    # ANIME INFO FROM URL
-    # =========================================================================
-
     def get_anime_from_url(self, url: str) -> Optional[Anime]:
-        """
-        Get anime details from a URL.
-
-        Args:
-            url: Anime page URL (watch or info page)
-
-        Returns:
-            Anime object or None if failed
-        """
         print_info(f"Fetching anime info from URL...")
 
         try:
             response = requests.get(url, headers=self.HEADERS, timeout=30)
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Try to find the detail section
             detail_div = soup.find("div", class_="anisc-detail")
             if not detail_div:
                 detail_div = soup
 
-            # Get name
             name_elem = detail_div.find("h2", class_="film-name") or detail_div.find("h2", class_="dynamic-name")
             if name_elem:
                 a_tag = name_elem.find("a")
@@ -366,7 +264,6 @@ class HianimeExtractor:
             else:
                 name = "Unknown Anime"
 
-            # Get episode counts from film-stats or tick items
             sub_eps = 0
             dub_eps = 0
 
@@ -387,26 +284,20 @@ class HianimeExtractor:
                 except ValueError:
                     pass
 
-            # Also check episode list for max episode number
             ep_items = soup.find_all("a", attrs={"data-number": True})
             if ep_items:
                 max_ep = max(int(item.get("data-number", 0)) for item in ep_items)
                 sub_eps = max(sub_eps, max_ep)
 
-            # Build watch URL
             base_url = url.split('?')[0]
             if '/watch/' not in base_url:
-                # Convert info URL to watch URL
                 base_url = base_url.replace('hianime.to/', 'hianime.to/watch/')
 
-            # Extract short name from URL slug
-            # e.g., "bleach-thousand-year-blood-war-the-conflict-19322" -> "Bleach"
             import re
             slug_match = re.search(r'/watch/([^/]+?)(?:-\d+)?$', base_url)
             short_name = ""
             if slug_match:
                 slug = slug_match.group(1)
-                # Get first word/segment of the slug as short name
                 first_word = slug.split('-')[0]
                 short_name = sanitize_filename(first_word.title())
 
@@ -422,20 +313,7 @@ class HianimeExtractor:
             print_error(f"Failed to get anime info: {e}")
             return None
 
-    # =========================================================================
-    # SUB/DUB SELECTION
-    # =========================================================================
-
     def select_download_type(self, anime: Anime) -> str:
-        """
-        Let user select sub or dub download type.
-
-        Args:
-            anime: Anime object with episode counts
-
-        Returns:
-            'sub' or 'dub'
-        """
         if anime.sub_episodes > 0 and anime.dub_episodes > 0:
             print(f"\n{Fore.GREEN}Both sub and dub available:{Style.RESET_ALL}")
             print(f"  Sub episodes: {Fore.YELLOW}{anime.sub_episodes}{Style.RESET_ALL}")
@@ -456,45 +334,18 @@ class HianimeExtractor:
             print_info("Only dub episodes available")
             return 'dub'
 
-    # =========================================================================
-    # SEASON NUMBER
-    # =========================================================================
-
     def get_season_number(self) -> int:
-        """
-        Get season number from user.
-
-        Returns:
-            Season number (default 1)
-        """
         return get_int_in_range(
             f"{Fore.CYAN}Enter season number (default 1): {Style.RESET_ALL}",
             min_val=1,
             max_val=99
         )
 
-    # =========================================================================
-    # EPISODE URL SCRAPING
-    # =========================================================================
-
     def get_episode_urls(self, url: str, start_ep: int, end_ep: int) -> List[Tuple[int, str, str]]:
-        """
-        Fetch episode URLs via AJAX API.
-        Handles non-sequential episode IDs.
-
-        Args:
-            url: Anime watch URL
-            start_ep: Starting episode number
-            end_ep: Ending episode number
-
-        Returns:
-            List of (episode_number, url, title) tuples
-        """
         import re
 
         base_url = url.split('?')[0]
 
-        # Extract anime ID from URL (e.g., "bleach-thousand-year-blood-war-the-conflict-19322" -> "19322")
         match = re.search(r'-(\d+)$', base_url.rstrip('/'))
         if not match:
             print_error("Could not extract anime ID from URL")
@@ -511,7 +362,6 @@ class HianimeExtractor:
         }
 
         try:
-            # Fetch episodes via AJAX API
             api_url = f"https://hianime.to/ajax/v2/episode/list/{anime_id}"
             response = requests.get(api_url, headers=headers, timeout=30)
 
@@ -524,7 +374,6 @@ class HianimeExtractor:
                 print_error("Invalid API response")
                 return []
 
-            # Parse the HTML from API response
             soup = BeautifulSoup(data['html'], "html.parser")
             ep_items = soup.find_all("a", attrs={"data-number": True})
 
@@ -558,12 +407,7 @@ class HianimeExtractor:
             print_error(f"Failed to fetch episodes: {e}")
             return []
 
-    # =========================================================================
-    # SERVER SELECTION (Selenium mode)
-    # =========================================================================
-
     def configure_selenium_driver(self):
-        """Configure Selenium driver with anti-detection measures."""
         if not SELENIUM_AVAILABLE:
             raise ImportError("Selenium not installed. Run: pip install selenium seleniumwire selenium-stealth")
 
@@ -608,7 +452,6 @@ class HianimeExtractor:
 
         self.driver.implicitly_wait(10)
 
-        # Block popups
         self.driver.execute_script("""
             window.alert = function() {};
             window.confirm = function() { return true; };
@@ -617,7 +460,6 @@ class HianimeExtractor:
         """)
 
     def get_server_options(self, download_type: str) -> list:
-        """Get available server options from the page."""
         if not self.driver:
             return []
 
@@ -637,7 +479,6 @@ class HianimeExtractor:
                 except:
                     pass
 
-            # Return sub servers (first) or dub servers (second)
             if len(options) == 1:
                 return options[0]
             elif download_type in ('sub', 's'):
@@ -650,15 +491,6 @@ class HianimeExtractor:
             return []
 
     def select_server_interactive(self, anime: Anime) -> Optional[str]:
-        """
-        Interactive server selection using Selenium.
-
-        Args:
-            anime: Anime object
-
-        Returns:
-            Selected server name or None
-        """
         if not SELENIUM_AVAILABLE:
             print_warning("Selenium not available for server selection")
             return None
@@ -671,14 +503,12 @@ class HianimeExtractor:
             self.driver.quit()
             return None
 
-        # Check if preferred server exists
         if self.preferred_server:
             for opt in options:
                 if opt.text.lower().strip() == self.preferred_server.lower().strip():
                     self.driver.quit()
                     return opt.text
 
-        # Display options
         print(f"\n{Fore.GREEN}Available servers:{Style.RESET_ALL}\n")
         server_names = []
         for i, opt in enumerate(options, 1):
@@ -695,18 +525,7 @@ class HianimeExtractor:
         self.driver.quit()
         return selected
 
-    # =========================================================================
-    # SELENIUM MEDIA CAPTURE (Fallback)
-    # =========================================================================
-
     def capture_media_requests(self) -> Optional[Dict[str, Any]]:
-        """
-        Capture m3u8 and vtt URLs from browser network requests.
-        This is the Selenium fallback method.
-
-        Returns:
-            Dict with 'm3u8', 'vtt', 'headers' keys or None if failed
-        """
         if not self.driver:
             return None
 
@@ -725,7 +544,6 @@ class HianimeExtractor:
 
                 uri = request.url.lower()
 
-                # Look for m3u8 master playlist
                 if not found_m3u8 and uri.endswith(".m3u8") and "master" in uri:
                     if uri not in self.captured_video_urls:
                         urls["m3u8"] = request.url
@@ -733,11 +551,9 @@ class HianimeExtractor:
                         found_m3u8 = True
                         continue
 
-                # Look for vtt subtitles
                 if not found_vtt and ".vtt" in uri and "thumbnail" not in uri:
                     if uri not in self.captured_subtitle_urls:
                         if not any(lang in uri for lang in self.OTHER_LANGS):
-                            # Verify it's English if langdetect is available
                             if LANGDETECT_AVAILABLE:
                                 try:
                                     content = requests.get(request.url, headers=dict(request.headers)).content
@@ -748,7 +564,6 @@ class HianimeExtractor:
                             else:
                                 urls["all-vtt"].append(request.url)
 
-            # Check if we found vtt
             if urls["all-vtt"] and not found_vtt:
                 found_vtt = True
 
@@ -770,7 +585,6 @@ class HianimeExtractor:
             else:
                 return None
 
-        # Select vtt if multiple found
         if urls["all-vtt"]:
             if len(urls["all-vtt"]) == 1:
                 urls["vtt"] = urls["all-vtt"][0]
@@ -784,16 +598,6 @@ class HianimeExtractor:
         return urls
 
     def get_m3u8_variant(self, m3u8_url: str, headers: dict) -> str:
-        """
-        Extract the actual video variant URL from master m3u8.
-
-        Args:
-            m3u8_url: Master m3u8 URL
-            headers: Request headers
-
-        Returns:
-            Variant m3u8 URL
-        """
         try:
             response = requests.get(m3u8_url, headers=headers)
             lines = response.text.splitlines()
@@ -809,10 +613,6 @@ class HianimeExtractor:
             print_error(f"Failed to get m3u8 variant: {e}")
             return m3u8_url
 
-    # =========================================================================
-    # EPISODE LIST BUILDING
-    # =========================================================================
-
     def build_episode_list(
         self,
         anime: Anime,
@@ -820,18 +620,6 @@ class HianimeExtractor:
         end_ep: int,
         filename_format: str = "standard",
     ) -> List[Episode]:
-        """
-        Build list of Episode objects with URLs scraped from page.
-
-        Args:
-            anime: Anime object
-            start_ep: Starting episode number
-            end_ep: Ending episode number
-            filename_format: Format type - 'full', 'standard', 'short', 'season', 'episode'
-
-        Returns:
-            List of Episode objects
-        """
         scraped = self.get_episode_urls(anime.url, start_ep, end_ep)
         if not scraped:
             return []
@@ -839,7 +627,6 @@ class HianimeExtractor:
         total_episodes = len(scraped)
         episodes = []
         for ep_num, ep_url, ep_title in scraped:
-            # Use the new format_filename method (passes total for single-episode detection)
             filename = anime.format_filename(ep_num, ep_title, filename_format, total_episodes)
             filename = sanitize_filename(filename)
 
@@ -852,12 +639,7 @@ class HianimeExtractor:
 
         return episodes
 
-    # =========================================================================
-    # EXPORT FUNCTIONS
-    # =========================================================================
-
     def save_to_csv(self, episodes: List[Episode], csv_path: str):
-        """Save episode list to CSV."""
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['Episode', 'URL', 'Title', 'Filename', 'Status'])
@@ -866,7 +648,6 @@ class HianimeExtractor:
         print_success(f"Saved episode list to {csv_path}")
 
     def save_to_json(self, anime: Anime, episodes: List[Episode], json_path: str):
-        """Save anime and episode metadata to JSON."""
         data = {
             **anime.to_dict(),
             'episodes': [ep.to_dict() for ep in episodes]
@@ -875,12 +656,7 @@ class HianimeExtractor:
             json.dump(data, f, indent=4, ensure_ascii=False)
         print_success(f"Saved metadata to {json_path}")
 
-    # =========================================================================
-    # CLEANUP
-    # =========================================================================
-
     def cleanup(self):
-        """Clean up resources (close Selenium driver if open)."""
         if self.driver:
             try:
                 self.driver.quit()
