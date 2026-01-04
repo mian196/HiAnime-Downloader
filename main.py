@@ -60,6 +60,16 @@ download_throttle_lock = threading.Lock()
 last_download_time = 0.0
 print_lock = threading.Lock()
 
+
+def is_single_episode_anime(extractor: HianimeExtractor, url: str) -> tuple:
+    anime = extractor.get_anime_from_url(url)
+    if not anime:
+        return None, None
+
+    max_eps = max(anime.sub_episodes, anime.dub_episodes)
+    is_single = max_eps <= 1
+    return is_single, anime
+
 LOG_LEVEL_MAP = {
     'DEBUG': logging.DEBUG,
     'INFO': logging.INFO,
@@ -386,6 +396,138 @@ def fetch_anime_to_csv(
     extractor.save_to_json(anime, episodes, json_path)
 
     return episodes, csv_path
+
+
+def download_movies_parallel(
+    extractor: HianimeExtractor,
+    movie_list: List[tuple],
+    output_base: str,
+    audio_type: str,
+    resolution: str,
+    season_number: int,
+    download_workers: int,
+    embed_workers: int,
+) -> dict:
+    main_logger = get_main_logger()
+    all_episodes = []
+
+    print_info(f"Preparing {len(movie_list)} movies for parallel download...")
+
+    for _, anime in movie_list:
+        if shutdown_event.is_set():
+            break
+
+        # Determine audio type
+        if audio_type == 'sub' and anime.sub_episodes > 0:
+            anime.download_type = 'sub'
+        elif audio_type == 'dub' and anime.dub_episodes > 0:
+            anime.download_type = 'dub'
+        elif anime.sub_episodes > 0:
+            anime.download_type = 'sub'
+        elif anime.dub_episodes > 0:
+            anime.download_type = 'dub'
+        else:
+            print_warning(f"No episodes available for: {anime.name}")
+            continue
+
+        anime.season_number = season_number
+
+        # Build episode list (should be just 1 episode for movies)
+        episodes = extractor.build_episode_list(anime, 1, 1, filename_format=FILENAME_FORMAT)
+        if not episodes:
+            print_warning(f"Failed to get episode info for: {anime.name}")
+            continue
+
+        # Set output directory per movie
+        output_dir = os.path.join(output_base, f"{anime.name} ({anime.download_type.title()})")
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Store output_dir in episode for the worker
+        for ep in episodes:
+            ep.output_dir = output_dir
+            all_episodes.append(ep)
+
+        main_logger.info(f"Queued: {anime.name}")
+
+    if not all_episodes:
+        print_error("No movies to download")
+        return {'downloaded': 0, 'embedded': 0, 'failed': 0, 'skipped': 0, 'total': 0}
+
+    print_info(f"Starting parallel download of {len(all_episodes)} movies with {download_workers} workers")
+
+    # Use modified download_from_episodes that handles per-episode output dirs
+    download_queue = Queue()
+    embed_queue = Queue()
+    stats = {'downloaded': 0, 'embedded': 0, 'failed': 0, 'skipped': 0, 'total': len(all_episodes)}
+    stats_lock = threading.Lock()
+    stop_event = threading.Event()
+
+    def log_stats():
+        with stats_lock:
+            done = stats['downloaded'] + stats['skipped']
+            main_logger.info(
+                f"Movies: {done}/{stats['total']} downloaded | "
+                f"{stats['embedded']} embedded | {stats['failed']} failed"
+            )
+
+    for ep in all_episodes:
+        download_queue.put(ep)
+
+    def dl_worker(worker_id: int):
+        while not stop_event.is_set() and not shutdown_event.is_set():
+            try:
+                ep = download_queue.get(timeout=1)
+            except Empty:
+                continue
+            # Get output_dir from episode
+            ep_output_dir = ep.output_dir or output_base
+            result = download_episode(ep, ep_output_dir, audio_type, resolution, worker_id=worker_id)
+            with stats_lock:
+                if result.status == "downloaded":
+                    stats['downloaded'] += 1
+                    result.output_dir = ep_output_dir
+                    embed_queue.put(result)
+                elif result.status == "skipped":
+                    stats['skipped'] += 1
+                else:
+                    stats['failed'] += 1
+            log_stats()
+            download_queue.task_done()
+
+    def embed_worker_fn(worker_id: int):
+        while not stop_event.is_set() and not shutdown_event.is_set():
+            try:
+                ep = embed_queue.get(timeout=1)
+            except Empty:
+                if download_queue.empty() and stats['downloaded'] + stats['failed'] + stats['skipped'] >= stats['total']:
+                    break
+                continue
+            result = embed_subtitle(ep, worker_id=worker_id)
+            with stats_lock:
+                if result.status == "completed":
+                    stats['embedded'] += 1
+            log_stats()
+            embed_queue.task_done()
+
+    threads = []
+    for i in range(download_workers):
+        t = threading.Thread(target=dl_worker, args=(i + 1,), daemon=True)
+        t.start()
+        threads.append(t)
+    for i in range(embed_workers):
+        t = threading.Thread(target=embed_worker_fn, args=(i + 1,), daemon=True)
+        t.start()
+        threads.append(t)
+
+    try:
+        download_queue.join()
+        stop_event.set()
+        for t in threads:
+            t.join(timeout=5)
+    except KeyboardInterrupt:
+        stop_event.set()
+
+    return stats
 
 
 def scrape_and_download_parallel(
@@ -756,20 +898,73 @@ def main():
                 print_info("Cancelled.")
                 return
 
+            # Categorize URLs into movies (single episode) and series (multiple episodes)
+            print_info("Analyzing URLs to detect movies vs series...")
+            movies = []  # List of (url, anime) tuples
+            series = []  # List of urls
+            failed_urls = []
+
+            for url in ANIME_URL_QUEUE:
+                if shutdown_event.is_set():
+                    break
+                is_single, anime = is_single_episode_anime(extractor, url)
+                if anime is None:
+                    print_warning(f"Failed to get info for: {url}")
+                    failed_urls.append(url)
+                elif is_single:
+                    movies.append((url, anime))
+                    print(f"  {Fore.YELLOW}[MOVIE]{Style.RESET_ALL} {anime.name}")
+                else:
+                    series.append(url)
+                    print(f"  {Fore.CYAN}[SERIES]{Style.RESET_ALL} {anime.name} ({max(anime.sub_episodes, anime.dub_episodes)} eps)")
+
             success_count = 0
-            fail_count = 0
-            for i, url in enumerate(ANIME_URL_QUEUE, 1):
+            fail_count = len(failed_urls)
+
+            # Process movies in parallel if any exist
+            if movies and not shutdown_event.is_set():
+                print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}  Downloading {len(movies)} movies in parallel ({args.download_workers} workers){Style.RESET_ALL}")
+                print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+
+                start_time = time.time()
+                stats = download_movies_parallel(
+                    extractor,
+                    movies,
+                    args.output,
+                    AUDIO_TYPE if AUDIO_TYPE in ('sub', 'dub') else 'sub',
+                    args.resolution,
+                    args.season,
+                    args.download_workers,
+                    args.embed_workers,
+                )
+                elapsed = time.time() - start_time
+
+                print(f"\n{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}  Movies Complete!{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+                print(f"Downloaded: {stats['downloaded']}")
+                print(f"Embedded: {stats['embedded']}")
+                print(f"Skipped: {stats.get('skipped', 0)}")
+                print(f"Failed: {stats['failed']}")
+                print(f"Time: {elapsed/60:.1f} min")
+
+                success_count += stats['downloaded'] + stats.get('skipped', 0)
+                fail_count += stats['failed']
+
+            # Process series sequentially (each series uses parallel episode downloads internally)
+            for i, url in enumerate(series, 1):
                 if shutdown_event.is_set():
                     print_warning("Shutdown requested, stopping queue processing")
                     break
 
                 print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-                print(f"{Fore.CYAN}  Processing queue item {i}/{queue_total}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}  Processing series {i}/{len(series)}{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
                 print(f"URL: {url}")
 
                 try:
-                    if process_single_anime(url, is_queue=True, queue_index=i, queue_total=queue_total):
+                    if process_single_anime(url, is_queue=True, queue_index=i, queue_total=len(series)):
                         success_count += 1
                     else:
                         fail_count += 1
@@ -777,14 +972,16 @@ def main():
                     print_error(f"Error processing {url}: {e}")
                     fail_count += 1
 
-                if i < queue_total and not shutdown_event.is_set():
-                    print_info("Moving to next anime in 3 seconds...")
+                if i < len(series) and not shutdown_event.is_set():
+                    print_info("Moving to next series in 3 seconds...")
                     time.sleep(3)
 
             print(f"\n{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
             print(f"{Fore.GREEN}  Queue Complete!{Style.RESET_ALL}")
             print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
-            print(f"Total: {queue_total}")
+            print(f"Total URLs: {queue_total}")
+            print(f"Movies: {len(movies)}")
+            print(f"Series: {len(series)}")
             print(f"Success: {success_count}")
             print(f"Failed: {fail_count}")
         else:

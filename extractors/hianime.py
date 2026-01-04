@@ -98,6 +98,7 @@ class Episode:
     error: Optional[str] = None
     m3u8_url: Optional[str] = None
     headers: Optional[Dict[str, str]] = None
+    output_dir: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
