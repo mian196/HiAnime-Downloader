@@ -8,7 +8,7 @@ import argparse
 import csv
 import logging
 from queue import Queue, Empty
-from typing import List
+from typing import List, Optional
 
 from colorama import init, Fore, Style
 
