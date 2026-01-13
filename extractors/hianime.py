@@ -45,6 +45,40 @@ except ImportError:
     LANGDETECT_AVAILABLE = False
 
 
+def extract_season_from_name(name: str) -> int:
+    """Extract season number from anime name.
+
+    Matches patterns like:
+    - "Season 2", "Season 02"
+    - "S2", "S02"
+    - "2nd Season", "3rd Season"
+    - "Part 2", "Part 02"
+    """
+    import re
+
+    # Pattern: "Season X" or "Season XX"
+    match = re.search(r'\bseason\s*(\d{1,2})\b', name, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    # Pattern: "SX" or "SXX" (but not part of a word)
+    match = re.search(r'\bS(\d{1,2})\b', name)
+    if match:
+        return int(match.group(1))
+
+    # Pattern: "Xnd/rd/th Season" (2nd Season, 3rd Season, etc.)
+    match = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)\s+season\b', name, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    # Pattern: "Part X"
+    match = re.search(r'\bpart\s*(\d{1,2})\b', name, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    return 1
+
+
 @dataclass
 class Anime:
     name: str
@@ -206,6 +240,7 @@ class HianimeExtractor:
                         sub_episodes=sub_eps,
                         dub_episodes=dub_eps,
                         short_name=short_name,
+                        season_number=extract_season_from_name(name),
                     ))
                 except Exception as e:
                     continue
@@ -302,12 +337,14 @@ class HianimeExtractor:
                 first_word = slug.split('-')[0]
                 short_name = sanitize_filename(first_word.title())
 
+            sanitized_name = sanitize_filename(name)
             return Anime(
-                name=sanitize_filename(name),
+                name=sanitized_name,
                 url=base_url,
                 sub_episodes=sub_eps,
                 dub_episodes=dub_eps,
                 short_name=short_name,
+                season_number=extract_season_from_name(sanitized_name),
             )
 
         except Exception as e:

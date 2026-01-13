@@ -404,7 +404,7 @@ def download_movies_parallel(
     output_base: str,
     audio_type: str,
     resolution: str,
-    season_number: int,
+    season_number: Optional[int],
     download_workers: int,
     embed_workers: int,
 ) -> dict:
@@ -430,7 +430,9 @@ def download_movies_parallel(
             print_warning(f"No episodes available for: {anime.name}")
             continue
 
-        anime.season_number = season_number
+        # Use explicitly provided season, or keep auto-detected from title
+        if season_number is not None:
+            anime.season_number = season_number
 
         # Build episode list (should be just 1 episode for movies)
         episodes = extractor.build_episode_list(anime, 1, 1, filename_format=FILENAME_FORMAT)
@@ -762,7 +764,7 @@ def main():
     parser.add_argument('--embed-workers', type=int, default=MAX_EMBED_WORKERS)
     parser.add_argument('--resolution', default=RESOLUTION)
     parser.add_argument('--audio-type', choices=['sub', 'dub'], default='sub')
-    parser.add_argument('--season', type=int, default=DEFAULT_SEASON if DEFAULT_SEASON > 0 else 1)
+    parser.add_argument('--season', type=int, default=None, help='Season number (auto-detected from title if not specified)')
     args = parser.parse_args()
 
     if args.from_csv:
@@ -825,7 +827,10 @@ def main():
         else:
             anime.download_type = extractor.select_download_type(anime)
 
-        anime.season_number = args.season
+        # Use explicitly provided season, or keep auto-detected season from title
+        if args.season is not None:
+            anime.season_number = args.season
+        # anime.season_number is already set by extract_season_from_name() in get_anime_from_url()
 
         max_eps = anime.sub_episodes if anime.download_type == 'sub' else anime.dub_episodes
         if DOWNLOAD_ALL:
@@ -848,6 +853,7 @@ def main():
 
         print(f"\n{Fore.YELLOW}Summary:{Style.RESET_ALL}")
         print(f"  Anime: {anime.name}")
+        print(f"  Season: {anime.season_number}")
         print(f"  Episodes: {start_ep} - {end_ep}")
         print(f"  Type: {anime.download_type}")
         print(f"  Resolution: {args.resolution}p")

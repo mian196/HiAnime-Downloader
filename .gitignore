@@ -209,3 +209,5 @@ __marimo__/
 
 # output of python scripts
 output/
+# temp files
+tmp*
