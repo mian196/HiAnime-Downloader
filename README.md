@@ -224,3 +224,10 @@ output/
 - Use `--fetch-only` to just get episode URLs without downloading
 - Graceful shutdown on Ctrl+C - waits for current downloads to complete
 - Single-episode content (movies/OVAs) automatically skips episode numbering
+
+## Acknowledgements
+
+Special thanks to the original creators whose work this project is based on:
+
+- **Main Codebase**: [HianimeDownloader](https://github.com/gheatherington/HianimeDownloader) by [@gheatherington](https://github.com/gheatherington)
+- **yt-dlp Plugin**: [yt-dlp-hianime](https://github.com/pratikpatel8982/yt-dlp-hianime) by [@pratikpatel8982](https://github.com/pratikpatel8982)
