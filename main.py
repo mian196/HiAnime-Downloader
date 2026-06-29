@@ -547,6 +547,7 @@ def download_from_episodes(
 
     try:
         download_queue.join()
+        embed_queue.join()
         stop_event.set()
         for t in threads:
             t.join(timeout=5)
@@ -705,6 +706,7 @@ def download_movies_parallel(
 
     try:
         download_queue.join()
+        embed_queue.join()
         stop_event.set()
         for t in threads:
             t.join(timeout=5)
@@ -862,6 +864,7 @@ def scrape_and_download_parallel(
     try:
         scraper.join()
         download_queue.join()
+        embed_queue.join()
         stop_event.set()
         for t in threads:
             t.join(timeout=5)
