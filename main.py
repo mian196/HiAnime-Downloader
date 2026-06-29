@@ -7,6 +7,7 @@ import threading
 import argparse
 import csv
 import logging
+import re
 from queue import Queue, Empty
 from typing import List, Optional
 
