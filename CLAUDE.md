@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HiAnime Downloader is a Python CLI tool for downloading anime from hianime.to with automatic subtitle embedding. It uses a parallel pipeline: scraping → downloading (yt-dlp) → subtitle embedding (FFmpeg).
+KickAssAnime Downloader is a Python CLI tool for downloading anime from kaa.lt with automatic subtitle embedding. It uses a parallel pipeline: scraping → downloading (yt-dlp) → subtitle embedding (FFmpeg).
 
 ## Commands
 
@@ -16,7 +16,7 @@ python main.py
 python main.py -s "anime name"
 
 # Direct URL download
-python main.py -u "https://hianime.to/watch/anime-slug"
+python main.py -u "https://kaa.lt/anime-slug"
 
 # Fetch episode list only (no download)
 python main.py -u "URL" --fetch-only
@@ -30,7 +30,7 @@ python -m py_compile main.py
 
 ## Architecture
 
-### Three-Stage Pipeline
+## Three-Stage Pipeline
 ```
 Scraper Thread → Download Queue → Download Workers (yt-dlp)
                                         ↓
@@ -41,7 +41,7 @@ Scraper Thread → Download Queue → Download Workers (yt-dlp)
 
 - **main.py**: Entry point, CLI parsing, parallel worker orchestration, signal handling for graceful shutdown
 - **config.py**: Loads `.env` settings (worker counts, resolution, timeouts, filename format)
-- **extractors/hianime.py**: `HianimeExtractor` class - search, URL parsing, AJAX API calls to fetch episode lists
+- **extractors/kickassanime.py**: `KickAssAnimeExtractor` class - search, URL parsing, API calls to fetch episode lists and dynamic media resolution
 - **tools/thread_logger.py**: Thread-aware colored logging with worker prefixes (W1-W6, E1-E4, SCRAPER, MAIN)
 - **tools/functions.py**: Utilities for filename sanitization, user prompts, colored output
 

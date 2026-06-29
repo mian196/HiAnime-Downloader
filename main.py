@@ -27,19 +27,21 @@ from config import (
     DOWNLOAD_ALL,
     VERBOSE,
     NO_SUBTITLES,
+    EMBED_CHAPTERS,
     DEFAULT_SEASON,
     FILENAME_FORMAT,
     ANIME_URL_QUEUE,
     LOG_LEVEL,
     LOG_TIMESTAMPS,
 )
+
 from tools.thread_logger import (
     ThreadLogger,
     get_worker_logger,
     get_scraper_logger,
     get_main_logger,
 )
-from extractors import HianimeExtractor
+from extractors import KickAssAnimeExtractor
 from extractors.hianime import Episode, Anime
 from tools.functions import (
     get_confirmation,
@@ -61,7 +63,7 @@ last_download_time = 0.0
 print_lock = threading.Lock()
 
 
-def is_single_episode_anime(extractor: HianimeExtractor, url: str) -> tuple:
+def is_single_episode_anime(extractor: KickAssAnimeExtractor, url: str) -> tuple:
     anime = extractor.get_anime_from_url(url)
     if not anime:
         return None, None
@@ -175,7 +177,7 @@ def load_episodes_from_csv(csv_path: str) -> List[Episode]:
     return episodes
 
 
-def download_episode(episode: Episode, output_dir: str, audio_type: str, resolution: str, worker_id: int = 0) -> Episode:
+def download_episode(episode: Episode, output_dir: str, audio_type: str, resolution: str, worker_id: int = 0, extractor: Optional[KickAssAnimeExtractor] = None) -> Episode:
     global last_download_time
 
     logger = get_worker_logger('download', worker_id) if worker_id > 0 else get_main_logger()
@@ -199,37 +201,70 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
             time.sleep(DOWNLOAD_DELAY - elapsed)
         last_download_time = time.time()
 
+    # Ensure episode has output_dir set for subtitle extraction
+    episode.output_dir = output_dir
+
+    # Resolve media URLs
+    if not episode.m3u8_url:
+        local_extractor = extractor or KickAssAnimeExtractor({'subtitle_lang': SUBTITLE_LANG, 'no_subtitles': NO_SUBTITLES})
+        media_info = local_extractor.resolve_media(episode, audio_type, resolution)
+        if media_info:
+            episode.m3u8_url = media_info.get("m3u8")
+            episode.subtitle_path = media_info.get("subtitle_path")
+            episode.headers = media_info.get("headers")
+
     try:
         episode.status = "downloading"
         video_path = os.path.join(output_dir, f"{episode.filename}.mp4")
         logger.info(f"EP{episode.number:02d}: Downloading - {episode.title}")
 
-        cmd = [
-            'yt-dlp', '-f', f'{audio_type}_{resolution}p',
-            '--write-subs', '--sub-lang', SUBTITLE_LANG, '--convert-subs', 'srt',
-            '-o', video_path, '--no-warnings', '--retries', '10', '--fragment-retries', '10',
-            episode.url
-        ]
+        if episode.m3u8_url:
+            # Map audio type to language codes used in m3u8
+            lang_code = "jpn" if audio_type == "sub" else "eng"
+            format_filter = f"bestvideo[height<={resolution}]+bestaudio[language={lang_code}]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best"
+            
+            cmd = [
+                'yt-dlp', '-f', format_filter,
+                '-o', video_path, '--no-warnings', '--retries', '10', '--fragment-retries', '10',
+                '--socket-timeout', '30'
+            ]
+            if episode.headers:
+                for k, v in episode.headers.items():
+                    cmd.extend(['--add-header', f"{k}:{v}"])
+            cmd.append(episode.m3u8_url)
+        else:
+            # Fallback to original Hianime logic if m3u8 was not resolved
+            cmd = [
+                'yt-dlp', '-f', f'{audio_type}_{resolution}p',
+                '--write-subs', '--sub-lang', SUBTITLE_LANG, '--convert-subs', 'srt',
+                '-o', video_path, '--no-warnings', '--retries', '10', '--fragment-retries', '10',
+                '--socket-timeout', '30', episode.url
+            ]
 
         yt_prefix = f"{worker_tag}:EP{episode.number:02d}" if worker_tag else f"EP{episode.number:02d}"
         result = run_subprocess(cmd, DOWNLOAD_TIMEOUT, prefix=yt_prefix)
 
-        if result.returncode != 0:
+        if result.returncode != 0 and episode.m3u8_url:
             logger.warning(f"EP{episode.number:02d}: Primary format failed, trying fallback")
             cmd_fallback = [
-                'yt-dlp', '-f', f'bv*[format_id^={audio_type}]+ba/b[format_id^={audio_type}]/b',
-                '-S', f'res:{resolution}', '--write-subs', '--sub-lang', SUBTITLE_LANG,
-                '--convert-subs', 'srt', '-o', video_path, '--retries', '10', episode.url
+                'yt-dlp', '-f', f'bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best',
+                '-o', video_path, '--retries', '10', '--socket-timeout', '30', episode.m3u8_url
             ]
+            if episode.headers:
+                for k, v in episode.headers.items():
+                    cmd_fallback.extend(['--add-header', f"{k}:{v}"])
             result = run_subprocess(cmd_fallback, DOWNLOAD_TIMEOUT, prefix=yt_prefix)
+
 
         if result.returncode == 0 and os.path.exists(video_path):
             episode.video_path = video_path
-            for ext in ['.en.srt', '.srt', '.eng.srt']:
-                sub_path = os.path.splitext(video_path)[0] + ext
-                if os.path.exists(sub_path):
-                    episode.subtitle_path = sub_path
-                    break
+            # If subtitles were not downloaded in Python, check for yt-dlp downloaded subs
+            if not episode.subtitle_path:
+                for ext in ['.en.srt', '.srt', '.eng.srt']:
+                    sub_path = os.path.splitext(video_path)[0] + ext
+                    if os.path.exists(sub_path):
+                        episode.subtitle_path = sub_path
+                        break
             episode.status = "downloaded"
             logger.success(f"EP{episode.number:02d}: Downloaded successfully")
         else:
@@ -245,14 +280,130 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
     return episode
 
 
+def fetch_mal_id(anime_name: str) -> Optional[int]:
+    import requests
+    # Search Jikan API for the anime
+    url = "https://api.jikan.moe/v4/anime"
+    try:
+        clean_name = re.sub(r'[\(\[\{\}\]\)]', '', anime_name).strip()
+        r = requests.get(url, params={"q": clean_name, "limit": 1}, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                mal_id = data[0].get("mal_id")
+                return mal_id
+    except Exception:
+        pass
+    return None
+
+
+def generate_chapters_metadata(episode: Episode, video_path: str) -> Optional[str]:
+    if not EMBED_CHAPTERS:
+        return None
+    mal_id = getattr(episode, 'mal_id', None)
+    if not mal_id:
+
+        return None
+        
+    url = f"https://api.aniskip.com/v1/skip-times/{mal_id}/{episode.number}"
+    params = {"types[]": ["op", "ed"]}
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data.get("found"):
+            return None
+            
+        op = None
+        ed = None
+        for res in data.get("results", []):
+            skip_type = res.get("skip_type")
+            interval = res.get("interval", {})
+            start = interval.get("start_time")
+            end = interval.get("end_time")
+            if start is not None and end is not None:
+                if skip_type == "op":
+                    op = (start, end)
+                elif skip_type == "ed":
+                    ed = (start, end)
+                    
+        if op is None and ed is None:
+            return None
+            
+        duration = 0.0
+        ffprobe_cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_format', video_path
+        ]
+        try:
+            res = subprocess.run(ffprobe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            probe_data = json.loads(res.stdout)
+            duration = float(probe_data.get('format', {}).get('duration', 0.0))
+        except Exception:
+            for res in data.get("results", []):
+                if res.get("episode_length"):
+                    duration = float(res.get("episode_length"))
+                    break
+                    
+        if duration <= 0.0:
+            return None
+            
+        chapters = []
+        events = []
+        if op and op[1] > op[0]:
+            events.append((op[0], op[1], "Opening"))
+        if ed and ed[1] > ed[0]:
+            events.append((ed[0], ed[1], "Ending"))
+            
+        events.sort(key=lambda x: x[0])
+        current_time = 0.0
+        part_idx = 1
+        
+        for start, end, label in events:
+            if start > current_time:
+                gap_label = "Prologue" if current_time == 0.0 else (f"Episode Part {part_idx}" if part_idx > 1 else "Episode")
+                if gap_label.startswith("Episode Part"):
+                    part_idx += 1
+                chapters.append({"start": current_time, "end": start, "title": gap_label})
+            chapters.append({"start": start, "end": end, "title": label})
+            current_time = end
+            
+        if duration > current_time:
+            gap_label = "Epilogue" if current_time > 0.0 else "Episode"
+            chapters.append({"start": current_time, "end": duration, "title": gap_label})
+            
+        metadata_filepath = os.path.splitext(video_path)[0] + "_metadata.txt"
+        with open(metadata_filepath, "w", encoding="utf-8") as f:
+            f.write(";FFMETADATA1\n")
+            f.write(f"title={episode.filename}\n\n")
+            for ch in chapters:
+                start_ms = int(ch["start"] * 1000)
+                end_ms = int(ch["end"] * 1000)
+                f.write("[CHAPTER]\n")
+                f.write("TIMEBASE=1/1000\n")
+                f.write(f"START={start_ms}\n")
+                f.write(f"END={end_ms}\n")
+                f.write(f"title={ch['title']}\n\n")
+                
+        return metadata_filepath
+    except Exception:
+        return None
+
+
 def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
     logger = get_worker_logger('embed', worker_id) if worker_id > 0 else get_main_logger()
 
     if shutdown_event.is_set() or episode.status != "downloaded" or not episode.video_path:
         return episode
 
-    if not episode.subtitle_path or not os.path.exists(episode.subtitle_path):
-        logger.info(f"EP{episode.number:02d}: No subtitles to embed, marking complete")
+    has_subs = episode.subtitle_path and os.path.exists(episode.subtitle_path)
+    
+    metadata_path = generate_chapters_metadata(episode, episode.video_path)
+    has_chapters = metadata_path is not None and os.path.exists(metadata_path)
+
+    if not has_subs and not has_chapters:
+        logger.info(f"EP{episode.number:02d}: No subtitles or chapters to embed, marking complete")
         episode.final_path = episode.video_path
         episode.status = "completed"
         return episode
@@ -263,33 +414,54 @@ def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
         temp_output = f"{base_path}_embedded.mkv"
         final_output = f"{base_path}.mkv"
 
-        logger.info(f"EP{episode.number:02d}: Embedding subtitles...")
+        logger.info(f"EP{episode.number:02d}: Embedding subtitles/chapters...")
 
-        cmd = [
-            'ffmpeg', '-y', '-i', episode.video_path, '-i', episode.subtitle_path,
-            '-c:v', 'copy', '-c:a', 'copy', '-c:s', 'srt',
-            '-map', '0:v:0', '-map', '0:a?', '-map', '1:0',
-            '-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default+forced',
-            temp_output
-        ]
+        cmd = ['ffmpeg', '-y']
+        cmd.extend(['-i', episode.video_path])
+        if has_subs:
+            cmd.extend(['-i', episode.subtitle_path])
+        if has_chapters:
+            cmd.extend(['-i', metadata_path])
+
+        cmd.extend(['-c:v', 'copy', '-c:a', 'copy'])
+        if has_subs:
+            cmd.extend(['-c:s', 'srt'])
+
+        cmd.extend(['-map', '0:v:0', '-map', '0:a?'])
+        if has_subs:
+            cmd.extend(['-map', '1:0'])
+            cmd.extend(['-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default+forced'])
+
+        if has_chapters:
+            metadata_idx = 2 if has_subs else 1
+            cmd.extend(['-map_metadata', str(metadata_idx)])
+
+        cmd.append(temp_output)
 
         result = run_subprocess(cmd, EMBED_TIMEOUT)
 
         if result.returncode == 0 and os.path.exists(temp_output):
             safe_remove(episode.video_path)
-            safe_remove(episode.subtitle_path)
+            if has_subs:
+                safe_remove(episode.subtitle_path)
+            if has_chapters:
+                safe_remove(metadata_path)
             os.rename(temp_output, final_output)
             episode.final_path = final_output
             episode.status = "completed"
-            logger.success(f"EP{episode.number:02d}: Subtitles embedded successfully")
+            logger.success(f"EP{episode.number:02d}: Subtitles/chapters embedded successfully")
         else:
             episode.status = "embed_failed"
             logger.error(f"EP{episode.number:02d}: Embed failed")
+            if has_chapters:
+                safe_remove(metadata_path)
 
     except Exception as e:
         episode.status = "embed_failed"
         episode.error = str(e)
         logger.error(f"EP{episode.number:02d}: {e}")
+        if 'metadata_path' in locals() and metadata_path:
+            safe_remove(metadata_path)
 
     return episode
 
@@ -303,6 +475,13 @@ def download_from_episodes(
     embed_workers: int
 ) -> dict:
     os.makedirs(output_dir, exist_ok=True)
+
+    # Resolve MAL ID for chapters skip times
+    anime_folder_name = os.path.basename(os.path.abspath(output_dir))
+    clean_anime_name = re.sub(r'\s*\((?:Sub|Dub)\)\s*$', '', anime_folder_name, flags=re.IGNORECASE).strip()
+    mal_id = fetch_mal_id(clean_anime_name)
+    for ep in episodes:
+        ep.mal_id = mal_id
 
     main_logger = get_main_logger()
 
@@ -399,7 +578,7 @@ def fetch_anime_to_csv(
 
 
 def download_movies_parallel(
-    extractor: HianimeExtractor,
+    extractor: KickAssAnimeExtractor,
     movie_list: List[tuple],
     output_base: str,
     audio_type: str,
@@ -444,9 +623,12 @@ def download_movies_parallel(
         output_dir = os.path.join(output_base, f"{anime.name} ({anime.download_type.title()})")
         os.makedirs(output_dir, exist_ok=True)
 
-        # Store output_dir in episode for the worker
+        # Resolve MAL ID for movies
+        mal_id = fetch_mal_id(anime.name)
+        # Store output_dir and mal_id in episode for the worker
         for ep in episodes:
             ep.output_dir = output_dir
+            ep.mal_id = mal_id
             all_episodes.append(ep)
 
         main_logger.info(f"Queued: {anime.name}")
@@ -483,7 +665,7 @@ def download_movies_parallel(
                 continue
             # Get output_dir from episode
             ep_output_dir = ep.output_dir or output_base
-            result = download_episode(ep, ep_output_dir, audio_type, resolution, worker_id=worker_id)
+            result = download_episode(ep, ep_output_dir, audio_type, resolution, worker_id=worker_id, extractor=extractor)
             with stats_lock:
                 if result.status == "downloaded":
                     stats['downloaded'] += 1
@@ -533,7 +715,7 @@ def download_movies_parallel(
 
 
 def scrape_and_download_parallel(
-    extractor: HianimeExtractor,
+    extractor: KickAssAnimeExtractor,
     anime: Anime,
     output_dir: str,
     start_ep: int,
@@ -570,64 +752,14 @@ def scrape_and_download_parallel(
             )
 
     def scraper_thread():
-        import re
         logger = get_scraper_logger()
-        base_url = anime.url.split('?')[0]
-
-        match = re.search(r'-(\d+)$', base_url.rstrip('/'))
-        if not match:
-            logger.error("Could not extract anime ID from URL")
-            scrape_done.set()
-            return
-
-        anime_id = match.group(1)
-        logger.info(f"Anime ID: {anime_id}")
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": base_url,
-        }
-
         try:
-            logger.info("Fetching episodes from API...")
-            api_url = f"https://hianime.to/ajax/v2/episode/list/{anime_id}"
-            response = requests.get(api_url, headers=headers, timeout=30)
-
-            if response.status_code != 200:
-                logger.error(f"API returned status {response.status_code}")
+            logger.info("Fetching episodes...")
+            ep_data = extractor.get_episode_urls(anime.url, start_ep, end_ep)
+            if not ep_data:
+                logger.error("No episode links found")
                 scrape_done.set()
                 return
-
-            data = response.json()
-            if not data.get('status') or not data.get('html'):
-                logger.error("Invalid API response")
-                scrape_done.set()
-                return
-
-            soup = BeautifulSoup(data['html'], "html.parser")
-            ep_items = soup.find_all("a", attrs={"data-number": True})
-
-            if not ep_items:
-                logger.error("No episode links found in API response")
-                scrape_done.set()
-                return
-
-            ep_data = []
-            for item in ep_items:
-                try:
-                    ep_num = int(item.get("data-number"))
-                    if start_ep <= ep_num <= end_ep:
-                        href = item.get("href", "")
-                        if href:
-                            ep_url = f"https://hianime.to{href}" if href.startswith("/") else href
-                            title = item.get("title", "") or f"Episode {ep_num}"
-                            ep_data.append((ep_num, ep_url, title.strip()))
-                except:
-                    continue
-
-            ep_data.sort(key=lambda x: x[0])
 
             total_episodes = len(ep_data)
             with stats_lock:
@@ -647,6 +779,7 @@ def scrape_and_download_parallel(
                     title=ep_title,
                     filename=filename
                 )
+                episode.mal_id = getattr(anime, 'mal_id', None)
 
                 with episodes_lock:
                     all_episodes.append(episode)
@@ -676,7 +809,7 @@ def scrape_and_download_parallel(
                     break
                 continue
 
-            result = download_episode(ep, output_dir, audio_type, resolution, worker_id=worker_id)
+            result = download_episode(ep, output_dir, audio_type, resolution, worker_id=worker_id, extractor=extractor)
 
             with stats_lock:
                 if result.status == "downloaded":
@@ -793,10 +926,10 @@ def main():
         print(f"\n{Fore.GREEN}Done! Downloaded: {stats['downloaded']}, Embedded: {stats['embedded']}, Failed: {stats['failed']}{Style.RESET_ALL}")
         return
 
-    extractor = HianimeExtractor({'subtitle_lang': SUBTITLE_LANG, 'no_subtitles': NO_SUBTITLES})
+    extractor = KickAssAnimeExtractor({'subtitle_lang': SUBTITLE_LANG, 'no_subtitles': NO_SUBTITLES})
 
-    def process_single_anime(anime_url: str, is_queue: bool = False, queue_index: int = 0, queue_total: int = 0):
-        anime = extractor.get_anime_from_url(anime_url)
+    def process_single_anime(anime_url: str, is_queue: bool = False, queue_index: int = 0, queue_total: int = 0, anime_ref: Optional[Anime] = None):
+        anime = anime_ref or extractor.get_anime_from_url(anime_url)
 
         if not anime:
             print_error(f"Failed to get anime info from: {anime_url}")
@@ -832,12 +965,33 @@ def main():
             anime.season_number = args.season
         # anime.season_number is already set by extract_season_from_name() in get_anime_from_url()
 
+        # Resolve MAL ID for chapters skip times
+        anime.mal_id = fetch_mal_id(anime.name)
+
         max_eps = anime.sub_episodes if anime.download_type == 'sub' else anime.dub_episodes
         if DOWNLOAD_ALL:
             start_ep, end_ep = 1, max_eps or 9999
         else:
-            start_ep = get_int_in_range("Start episode: ", 1, max_eps or 9999)
-            end_ep = get_int_in_range("End episode: ", start_ep, max_eps or 9999)
+            print(f"\n{Fore.GREEN}Episodes available: 1 to {max_eps}{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}1. Download all episodes (1-{max_eps}){Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}2. Download single episode{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}3. Download from episode X to last episode{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}4. Download specific range (X-Y){Style.RESET_ALL}")
+            
+            option = get_int_in_range(f"\n{Fore.CYAN}Select option (1-4): {Style.RESET_ALL}", 1, 4)
+            
+            if option == 1:
+                start_ep, end_ep = 1, max_eps or 9999
+            elif option == 2:
+                start_ep = get_int_in_range(f"{Fore.CYAN}Enter episode number to download: {Style.RESET_ALL}", 1, max_eps or 9999)
+                end_ep = start_ep
+            elif option == 3:
+                start_ep = get_int_in_range(f"{Fore.CYAN}Start download from episode: {Style.RESET_ALL}", 1, max_eps or 9999)
+                end_ep = max_eps or 9999
+            else:
+                start_ep = get_int_in_range(f"{Fore.CYAN}Start episode: {Style.RESET_ALL}", 1, max_eps or 9999)
+                end_ep = get_int_in_range(f"{Fore.CYAN}End episode: {Style.RESET_ALL}", start_ep, max_eps or 9999)
+
 
         output_dir = os.path.join(args.output, f"{anime.name} ({anime.download_type.title()})")
 
@@ -921,7 +1075,7 @@ def main():
                     movies.append((url, anime))
                     print(f"  {Fore.YELLOW}[MOVIE]{Style.RESET_ALL} {anime.name}")
                 else:
-                    series.append(url)
+                    series.append((url, anime))
                     print(f"  {Fore.CYAN}[SERIES]{Style.RESET_ALL} {anime.name} ({max(anime.sub_episodes, anime.dub_episodes)} eps)")
 
             success_count = 0
@@ -959,7 +1113,7 @@ def main():
                 fail_count += stats['failed']
 
             # Process series sequentially (each series uses parallel episode downloads internally)
-            for i, url in enumerate(series, 1):
+            for i, (url, anime_ref) in enumerate(series, 1):
                 if shutdown_event.is_set():
                     print_warning("Shutdown requested, stopping queue processing")
                     break
@@ -970,7 +1124,7 @@ def main():
                 print(f"URL: {url}")
 
                 try:
-                    if process_single_anime(url, is_queue=True, queue_index=i, queue_total=len(series)):
+                    if process_single_anime(url, is_queue=True, queue_index=i, queue_total=len(series), anime_ref=anime_ref):
                         success_count += 1
                     else:
                         fail_count += 1

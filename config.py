@@ -22,8 +22,10 @@ VERBOSE = os.getenv('VERBOSE', 'true').lower() in ('true', '1', 'yes')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 LOG_TIMESTAMPS = os.getenv('LOG_TIMESTAMPS', 'true').lower() in ('true', '1', 'yes')
 NO_SUBTITLES = os.getenv('NO_SUBTITLES', 'false').lower() in ('true', '1', 'yes')
+EMBED_CHAPTERS = os.getenv('EMBED_CHAPTERS', 'true').lower() in ('true', '1', 'yes')
 DEFAULT_SEASON = int(os.getenv('DEFAULT_SEASON', 0))
 FILENAME_FORMAT = os.getenv('FILENAME_FORMAT', 'standard').lower()
+
 
 
 def parse_anime_urls() -> List[str]:
@@ -62,7 +64,9 @@ def print_config():
     print(f"  Subtitle Lang: {SUBTITLE_LANG}")
     print(f"  Download Delay: {DOWNLOAD_DELAY}s")
     print(f"  Download All: {DOWNLOAD_ALL}")
+    print(f"  Embed Chapters: {EMBED_CHAPTERS}")
     print(f"  Verbose: {VERBOSE}")
+
     print(f"  Log Level: {LOG_LEVEL}")
     print(f"  Log Timestamps: {LOG_TIMESTAMPS}")
     if ANIME_URL_QUEUE:

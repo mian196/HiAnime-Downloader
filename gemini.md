@@ -11,8 +11,10 @@ This file provides guidance to Google Gemini when working with code in this repo
 
 **Key Differences from Source:**
 
-- Focuses exclusively on HiAnime (removed multi-platform support)
-- Uses [yt-dlp-hianime](https://github.com/pratikpatel8982/yt-dlp-hianime) plugin instead of Selenium-based m3u8 capture
+- Focuses exclusively on KickAssAnime (`kaa.lt`)
+- Uses direct REST JSON API queries to fetch anime details and episode lists
+- Employs dynamic Selenium-based `.m3u8` and `.vtt` URL capturing via Chrome's performance logging (avoids MITM proxy crashes)
+- Automatically downloads and converts `.vtt` subtitles to `.srt` format in Python
 - Implements a parallel 3-stage pipeline (Scrape → Download → Embed)
 - Adds comprehensive `.env` configuration system
 - Provides thread-aware colored logging
@@ -28,26 +30,15 @@ This file provides guidance to Google Gemini when working with code in this repo
 | `yt-dlp` | Video downloading engine | `pip install yt-dlp` |
 | `FFmpeg` | Subtitle embedding, video processing | `winget install Gyan.FFmpeg` |
 
-### Required Plugin
+### Required Python Packages
 
-| Plugin | Repository | Install |
-|--------|------------|---------|
-| `yt-dlp-hianime` | [pratikpatel8982/yt-dlp-hianime](https://github.com/pratikpatel8982/yt-dlp-hianime) | `pip install -U https://github.com/pratikpatel8982/yt-dlp-hianime/archive/master.zip` |
-
-> [!NOTE]
-> The plugin is **external code I do not modify**. If yt-dlp or the plugin introduces breaking changes, identify them and update this context accordingly.
-
-### Python Packages
-
-**Required:** `beautifulsoup4`, `requests`, `colorama`, `python-dotenv`, `yt-dlp`
-
-**Optional:** `selenium`, `selenium-wire`, `selenium-stealth`, `langdetect` (for fallback m3u8 capture and language detection)
+**Required:** `beautifulsoup4`, `requests`, `colorama`, `python-dotenv`, `yt-dlp`, `selenium`
 
 ---
 
 ## Project Overview
 
-HiAnime Downloader is a Python CLI tool for downloading anime from hianime.to with automatic subtitle embedding. It uses a parallel pipeline: **Scraping → Downloading (yt-dlp) → Subtitle Embedding (FFmpeg)**.
+KickAssAnime Downloader is a Python CLI tool for downloading anime from kaa.lt with automatic subtitle embedding. It uses a parallel pipeline: **Scraping → Downloading (yt-dlp) → Subtitle Embedding (FFmpeg)**.
 
 ---
 
@@ -61,7 +52,7 @@ python main.py
 python main.py -s "anime name"
 
 # Direct URL download
-python main.py -u "https://hianime.to/watch/anime-slug"
+python main.py -u "https://kaa.lt/anime-slug"
 
 # Fetch episode list only (no download)
 python main.py -u "URL" --fetch-only
@@ -99,20 +90,20 @@ python -m py_compile main.py
 |------|---------|
 | `main.py` | Entry point, CLI parsing, parallel worker orchestration, signal handling |
 | `config.py` | Loads `.env` settings (worker counts, resolution, timeouts, filename format) |
-| `extractors/hianime.py` | `HianimeExtractor` class - search, URL parsing, AJAX API calls |
+| `extractors/kickassanime.py` | `KickAssAnimeExtractor` class - search, URL parsing, show details API, episodes list API, and player media resolver |
 | `tools/thread_logger.py` | Thread-aware colored logging with worker prefixes (W1-W6, E1-E4) |
 | `tools/functions.py` | Utilities for filename sanitization, user prompts, colored output |
 
 ### Key Data Classes (`extractors/hianime.py`)
 
 - **`Anime`**: `name`, `url`, `sub_episodes`, `dub_episodes`, `download_type`, `season_number`
-- **`Episode`**: `number`, `url`, `title`, `filename`, `video_path`, `subtitle_path`, `status`, `error`
+- **`Episode`**: `number`, `url`, `title`, `filename`, `video_path`, `subtitle_path`, `status`, `error`, `m3u8_url`, `headers`
 
 ### Threading Model
 
-- 1 scraper thread fetches episode URLs
-- N download workers (default 6) run yt-dlp in parallel
-- M embed workers (default 4) run FFmpeg in parallel
+- 1 scraper thread fetches episode URLs from KAA API
+- N download workers (default 6) resolve video/sub URLs via headless Selenium and run yt-dlp in parallel
+- M embed workers (default 4) run FFmpeg in parallel to mux subtitle file into MKV
 - Thread-safe queues connect stages; locks protect shared state
 - `shutdown_event` enables graceful Ctrl+C handling
 

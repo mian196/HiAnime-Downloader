@@ -1,6 +1,6 @@
-# HiAnime Downloader
+# KickAssAnime Downloader
 
-A parallel anime downloader for hianime.to with automatic subtitle embedding.
+A parallel anime downloader for kaa.lt (KickAssAnime) with automatic subtitle embedding.
 
 ## Features
 
@@ -9,8 +9,10 @@ A parallel anime downloader for hianime.to with automatic subtitle embedding.
 - **Search by name** - Find anime without knowing the URL
 - **Sub/Dub selection** - Choose Japanese or English audio
 - **Season number support** - Proper naming (S01E05 format)
-- **Auto subtitle embedding** - Subtitles enabled by default in video player
+- **Auto subtitle embedding** - Subtitles enabled by default in video player (.mkv muxing)
+- **Dynamic Chapters (Skip Times)** - Automatically fetches OP/ED timestamps from AniSkip and embeds them as chapters into the output `.mkv` files (for easy player skipping)
 - **Queue mode** - Download multiple anime in sequence
+
 - **CSV export** - Save episode list for later download
 - **Thread-aware logging** - Color-coded output with timestamps
 - **Configurable filename formats** - Multiple naming conventions available
@@ -18,7 +20,8 @@ A parallel anime downloader for hianime.to with automatic subtitle embedding.
 ## Requirements
 
 - Python 3.8+
-- yt-dlp with [hianime plugin](https://github.com/pratikpatel8982/yt-dlp-hianime)
+- Selenium (for dynamic stream logging and resolution)
+- yt-dlp (must be in PATH)
 - FFmpeg (must be in PATH)
 
 ## Quick Start
@@ -35,11 +38,10 @@ winget install Python.Python.3.13
 winget install Gyan.FFmpeg
 ```
 
-### 3. Install yt-dlp with HiAnime plugin
+### 3. Install yt-dlp
 
 ```bash
 pip install yt-dlp
-pip install -U https://github.com/pratikpatel8982/yt-dlp-hianime/archive/master.zip
 ```
 
 ### 4. Install dependencies
@@ -78,7 +80,7 @@ python main.py -s "bleach"
 ### Direct URL
 
 ```bash
-python main.py -u "https://hianime.to/watch/bleach-806"
+python main.py -u "https://kaa.lt/bleach-0948"
 ```
 
 ### Fetch Only (no download)
