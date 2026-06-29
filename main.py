@@ -280,13 +280,18 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
     return episode
 
 
-def fetch_mal_id(anime_name: str) -> Optional[int]:
+def fetch_mal_id(anime_name: str, is_movie: bool = False) -> Optional[int]:
     import requests
     # Search Jikan API for the anime
     url = "https://api.jikan.moe/v4/anime"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    anime_type = "movie" if is_movie else "tv"
     try:
         clean_name = re.sub(r'[\(\[\{\}\]\)]', '', anime_name).strip()
-        r = requests.get(url, params={"q": clean_name, "limit": 1}, timeout=10)
+        params = {"q": clean_name, "limit": 1, "type": anime_type}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json().get("data", [])
             if data:
@@ -294,7 +299,22 @@ def fetch_mal_id(anime_name: str) -> Optional[int]:
                 return mal_id
     except Exception:
         pass
+
+    # Fallback to general search without type filter
+    try:
+        clean_name = re.sub(r'[\(\[\{\}\]\)]', '', anime_name).strip()
+        params_fallback = {"q": clean_name, "limit": 1}
+        r = requests.get(url, params=params_fallback, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                mal_id = data[0].get("mal_id")
+                return mal_id
+    except Exception:
+        pass
+
     return None
+
 
 
 def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Optional[str]:
@@ -484,7 +504,8 @@ def download_from_episodes(
     # Resolve MAL ID for chapters skip times
     anime_folder_name = os.path.basename(os.path.abspath(output_dir))
     clean_anime_name = re.sub(r'\s*\((?:Sub|Dub)\)\s*$', '', anime_folder_name, flags=re.IGNORECASE).strip()
-    mal_id = fetch_mal_id(clean_anime_name)
+    mal_id = fetch_mal_id(clean_anime_name, is_movie=False)
+
     for ep in episodes:
         ep.mal_id = mal_id
 
@@ -630,7 +651,8 @@ def download_movies_parallel(
         os.makedirs(output_dir, exist_ok=True)
 
         # Resolve MAL ID for movies
-        mal_id = fetch_mal_id(anime.name)
+        mal_id = fetch_mal_id(anime.name, is_movie=True)
+
         # Store output_dir and mal_id in episode for the worker
         for ep in episodes:
             ep.output_dir = output_dir
@@ -974,7 +996,8 @@ def main():
         # anime.season_number is already set by extract_season_from_name() in get_anime_from_url()
 
         # Resolve MAL ID for chapters skip times
-        anime.mal_id = fetch_mal_id(anime.name)
+        anime.mal_id = fetch_mal_id(anime.name, is_movie=False)
+
 
         max_eps = anime.sub_episodes if anime.download_type == 'sub' else anime.dub_episodes
         if DOWNLOAD_ALL:
