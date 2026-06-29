@@ -297,23 +297,27 @@ def fetch_mal_id(anime_name: str) -> Optional[int]:
     return None
 
 
-def generate_chapters_metadata(episode: Episode, video_path: str) -> Optional[str]:
+def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Optional[str]:
     if not EMBED_CHAPTERS:
         return None
     mal_id = getattr(episode, 'mal_id', None)
     if not mal_id:
-
+        logger.info(f"EP{episode.number:02d}: No MAL ID resolved, skipping chapter lookup")
         return None
         
+    logger.info(f"EP{episode.number:02d}: Checking AniSkip for intro/outro skip times (MAL ID: {mal_id})...")
     url = f"https://api.aniskip.com/v1/skip-times/{mal_id}/{episode.number}"
     params = {"types[]": ["op", "ed"]}
     try:
         r = requests.get(url, params=params, timeout=10)
         if r.status_code != 200:
+            logger.warning(f"EP{episode.number:02d}: AniSkip API returned HTTP status {r.status_code}")
             return None
         data = r.json()
         if not data.get("found"):
+            logger.info(f"EP{episode.number:02d}: No skip times found in AniSkip database")
             return None
+
             
         op = None
         ed = None
@@ -399,7 +403,8 @@ def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
 
     has_subs = episode.subtitle_path and os.path.exists(episode.subtitle_path)
     
-    metadata_path = generate_chapters_metadata(episode, episode.video_path)
+    metadata_path = generate_chapters_metadata(episode, episode.video_path, logger)
+
     has_chapters = metadata_path is not None and os.path.exists(metadata_path)
 
     if not has_subs and not has_chapters:
