@@ -8,6 +8,7 @@ import argparse
 import csv
 import logging
 import re
+import requests
 from queue import Queue, Empty
 from typing import List, Optional
 
@@ -412,8 +413,10 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
                 f.write(f"title={ch['title']}\n\n")
                 
         return metadata_filepath
-    except Exception:
+    except Exception as e:
+        logger.warning(f"EP{episode.number:02d}: Chapter metadata generation failed: {e}")
         return None
+
 
 
 def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
