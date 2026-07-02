@@ -1,235 +1,178 @@
-# KickAssAnime Downloader
+# ⚡ KAA Downloader (KickAssAnime)
 
-A parallel anime downloader for kaa.lt (KickAssAnime) with automatic subtitle embedding.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/FFmpeg-Supported-green?style=for-the-badge&logo=ffmpeg&logoColor=white" alt="FFmpeg">
+  <img src="https://img.shields.io/badge/yt--dlp-Supported-red?style=for-the-badge&logo=youtube&logoColor=white" alt="yt-dlp">
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="MIT License">
+</p>
 
-## Features
+A state-of-the-art, high-performance parallel downloader for **kaa.lt** (KickAssAnime) with automatic subtitle conversion and lossy-free chapter skip-time embedding.
 
-- **Parallel scraping + downloading** - Downloads start as soon as URLs are found
-- **Handles non-sequential episode IDs** - Scrapes actual URLs from the page
-- **Search by name** - Find anime without knowing the URL
-- **Sub/Dub selection** - Choose Japanese or English audio
-- **Season number support** - Proper naming (S01E05 format)
-- **Auto subtitle embedding** - Subtitles enabled by default in video player (.mkv muxing)
-- **Dynamic Chapters (Skip Times)** - Automatically fetches OP/ED timestamps from AniSkip and embeds them as chapters into the output `.mkv` files (for easy player skipping)
-- **Queue mode** - Download multiple anime in sequence
+---
 
-- **CSV export** - Save episode list for later download
-- **Thread-aware logging** - Color-coded output with timestamps
-- **Configurable filename formats** - Multiple naming conventions available
+## ✨ Features
 
-## Requirements
+- **🚀 3-Stage Parallel Pipeline** — Scraping, downloading, and embedding run concurrently on separate workers.
+- **⏱️ Dynamic Chapter Skip Times** — Integrates Jikan & AniSkip APIs to automatically embed `Opening` and `Ending` timestamps as chapters into the final video (compatible with VLC, MPV, MPC-HC, etc.).
+- **💬 Auto Subtitle Embedding** — Subtitles are downloaded as `.vtt`, natively converted to `.srt`, and multiplexed into the `.mkv` file with `default+forced` flags.
+- **🔍 Interactive Search & Range Selection** — Search for anime by name directly in the terminal, and choose custom download ranges (e.g. single episode, starting from episode X, or range X to Y).
+- **🎛️ Configurable Filenames** — Choose from 5 different naming conventions (`standard`, `full`, `short`, `season`, `episode`) to match your media server structure (e.g. Plex, Jellyfin).
+- **🚦 Smart Rate Limiting & Timeouts** — Configurable request delays and HLS fragment socket timeouts to prevent rate limits and terminal hangs.
+- **🛡️ Graceful Interrupts** — Responds to `Ctrl+C` by finishing current downloads before exiting safely.
 
-- Python 3.8+
-- Selenium (for dynamic stream logging and resolution)
-- yt-dlp (must be in PATH)
-- FFmpeg (must be in PATH)
+---
 
-## Quick Start
+## 📐 Pipeline Architecture
 
-### 1. Install Python
-
-```bash
-winget install Python.Python.3.13
+```text
+  ┌─────────────────────────────────────────────────────────────┐
+  │                    PARALLEL EXECUTION MODEL                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  [SCRAPER THREAD]     [DOWNLOAD WORKERS]    [EMBED WORKERS] │
+  │        │                      │                     │       │
+  │  Scrapes URLs  ───▶  [Download Queue]               │       │
+  │  (Details API)                │                     │       │
+  │                        Worker 1 (yt-dlp)            │       │
+  │                        Worker 2 (yt-dlp) ──▶  [Embed Queue] │
+  │                               ▼                     │       │
+  │                        (Raw MP4 Streams)       Worker 1     │
+  │                                                Worker 2     │
+  │                                                     ▼       │
+  │                                              (FFmpeg Muxing)│
+  │                                                     ▼       │
+  │                                              (Final .mkv)   │
+  └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Install FFmpeg
+---
 
-```bash
+## 🛠️ Quick Start
+
+### 1. Install System Dependencies (Windows)
+
+```powershell
+# Install Python 3.13
+winget install Python.Python.3.13
+
+# Install FFmpeg (required for muxing and chapters)
 winget install Gyan.FFmpeg
 ```
 
-### 3. Install yt-dlp
+### 2. Set Up Virtual Environment & Dependencies
 
 ```bash
-pip install yt-dlp
-```
+# Clone the repository
+git clone git@github.com:mian196/KAA-Downloader.git
+cd KAA-Downloader
 
-### 4. Install dependencies
+# Create and activate venv
+python -m venv .venv
+.venv\Scripts\activate
 
-```bash
+# Install requirements
 pip install -r requirements.txt
 ```
 
-### 5. Configure (optional)
+### 3. Initialize Configuration
 
+Copy the example configuration to create your local `.env`:
 ```bash
 cp .env.example .env
-# Edit .env with your settings
 ```
 
-### 6. Run
+---
 
+## 🚀 Usage Guide
+
+### 📱 Interactive Command Center
+Simply launch the program without arguments to search for anime or enter custom URLs:
 ```bash
 python main.py
 ```
 
-## Usage
-
-### Interactive Mode
-
+### 🔍 Search by Name
 ```bash
-python main.py
+python main.py -s "Horimiya"
 ```
 
-### Search by Name
-
+### 🔗 Direct URL Download
 ```bash
-python main.py -s "bleach"
+python main.py -u "https://kaa.lt/horimiya-1e9c"
 ```
 
-### Direct URL
-
+### 📋 Scrape URLs Only (CSV Export)
 ```bash
-python main.py -u "https://kaa.lt/bleach-0948"
+python main.py -u "https://kaa.lt/horimiya-1e9c" --fetch-only
 ```
 
-### Fetch Only (no download)
-
+### 📂 Resume Download from CSV
 ```bash
-python main.py -u "URL" --fetch-only
-# Creates CSV with episode URLs for later download
+python main.py --from-csv "output/Horimiya (Sub)/Horimiya_episodes.csv"
 ```
 
-### Download from CSV
+---
 
-```bash
-python main.py --from-csv "output/AnimeName/AnimeName_episodes.csv"
-```
+## ⚙️ Configuration Options (`.env`)
 
-### Command Line Options
+Every aspect of the downloader is customizable via settings inside the `.env` file:
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| **ANIME_URL** | `None` | If set, skips the interactive input and starts downloads immediately. |
+| **ANIME_URLS** | `None` | Comma-separated list of URLs to process sequentially in queue mode. |
+| **DOWNLOAD_WORKERS** | `6` | Number of concurrent `yt-dlp` download processes. |
+| **EMBED_WORKERS** | `4` | Number of concurrent `FFmpeg` subtitle/chapter muxers. |
+| **OUTPUT_DIR** | `output` | Directory where downloaded anime folders are stored. |
+| **DOWNLOAD_ALL** | `false` | If `false`, prompts you for custom episode ranges (all, single, start X, range X-Y). |
+| **VERBOSE** | `true` | Outputs real-time progress and logs from `yt-dlp`. |
+| **LOG_LEVEL** | `INFO` | Level of terminal verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+| **RESOLUTION** | `720` | Desired video quality (`720`, `1080`). |
+| **AUDIO_TYPE** | `sub` | Language track to extract (`sub` for Japanese, `dub` for English). |
+| **EMBED_CHAPTERS** | `true` | Enables AniSkip skip-time chapter embedding in output video files. |
+| **FILENAME_FORMAT** | `standard` | Template for output files (`standard`, `full`, `short`, `season`, `episode`). |
+| **DOWNLOAD_DELAY** | `2` | Delay in seconds between starting downloads (prevents server throttling). |
+| **DOWNLOAD_TIMEOUT**| `3600` | Max seconds allowed for downloading a single episode stream. |
+
+---
+
+## 🗂️ Filename Formats
+
+| Format | Naming Pattern | Example Output |
+| :--- | :--- | :--- |
+| `episode` | `E{ep}` | `E02.mkv` |
+| `season` | `S{season}E{ep}` | `S01E02.mkv` |
+| `short` | `{ShortTitle} - S{season}E{ep}` | `Bleach - S01E02.mkv` |
+| `standard` | `{CleanTitle} - S{season}E{ep}` | `Bleach TYBW The Conflict - S01E02.mkv` |
+| `full` | `{CleanTitle} - S{season}E{ep} - {EpTitle}` | `Bleach TYBW The Conflict - S01E02 - Kill The King.mkv` |
+
+---
+
+## 📁 Repository Structure
 
 ```text
-Options:
-  -u, --url             Anime URL
-  -s, --search          Search anime by name
-  -o, --output          Output directory (default: output)
-  --from-csv            Download from existing CSV file
-  --fetch-only          Only scrape URLs to CSV, no download
-  --download-workers    Number of parallel downloads (default: 6)
-  --embed-workers       Number of parallel FFmpeg processes (default: 4)
-  --resolution          Video resolution: 720, 1080 (default: 720)
-  --audio-type          Audio: sub or dub (default: sub)
-  --season              Season number (default: 1)
-```
-
-## How It Works
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                     PARALLEL PIPELINE                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  SCRAPER              DOWNLOADERS           EMBEDDERS        │
-│  ───────              ───────────           ─────────        │
-│                                                              │
-│  EP1 found ────────▶  [Download Queue] ──▶ [Embed Queue]    │
-│  EP2 found ────────▶       ▼                   ▼            │
-│  EP3 found ────────▶    Worker 1 ─────────▶ Worker 1        │
-│  ...                    Worker 2 ─────────▶ Worker 2        │
-│                                                              │
-│  (scraping URLs)     (yt-dlp downloads)   (FFmpeg embed)    │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-1. **Scrape** - Fetches episode URLs from anime page via AJAX API
-2. **Queue** - Each URL is immediately added to download queue
-3. **Download** - Parallel yt-dlp workers download videos + subtitles
-4. **Embed** - Parallel FFmpeg workers embed subtitles into MKV
-5. **Cleanup** - Removes separate .srt files after embedding
-
-## Configuration (.env)
-
-```bash
-# Anime URL (optional - for single anime)
-ANIME_URL=https://hianime.to/watch/bleach-806
-
-# Multiple URLs (queue mode - comma separated)
-ANIME_URLS=url1,url2,url3
-
-# Workers
-DOWNLOAD_WORKERS=6      # Parallel download threads
-EMBED_WORKERS=4         # Parallel FFmpeg processes
-
-# Video settings
-RESOLUTION=720          # 720 or 1080
-AUDIO_TYPE=sub          # sub or dub
-SUBTITLE_LANG=en        # Subtitle language code
-
-# Behavior
-DOWNLOAD_ALL=true       # Download all episodes without prompting
-VERBOSE=true            # Show yt-dlp output
-DEFAULT_SEASON=0        # 0 = prompt user, 1+ = use that season
-NO_SUBTITLES=false      # Skip subtitle download/embedding
-
-# Filename format: episode, season, short, standard, full
-FILENAME_FORMAT=standard
-
-# Logging
-LOG_LEVEL=INFO          # DEBUG, INFO, WARNING, ERROR
-LOG_TIMESTAMPS=true     # Include timestamps in log output
-
-# Rate limiting
-DOWNLOAD_DELAY=2        # Seconds between starting downloads
-DOWNLOAD_TIMEOUT=3600   # Max seconds per download (1 hour)
-EMBED_TIMEOUT=600       # Max seconds per embed (10 minutes)
-```
-
-### Filename Formats
-
-| Format     | Example Output                                       |
-| ---------- | ---------------------------------------------------- |
-| `episode`  | `E02`                                                |
-| `season`   | `S01E02`                                             |
-| `short`    | `Bleach - S01E02`                                    |
-| `standard` | `Bleach TYBW The Conflict - S01E02`                  |
-| `full`     | `Bleach TYBW The Conflict - S01E02 - Kill The King`  |
-
-## Project Structure
-
-```text
-HiAnime-Downloader/
-├── main.py              # Entry point and download pipeline
-├── config.py            # Settings loader from .env
-├── .env                 # Your configuration
-├── .env.example         # Example configuration
-├── requirements.txt     # Python dependencies
+KAA-Downloader/
+├── main.py               # Main pipeline manager & worker threads
+├── config.py             # Parses settings from .env
+├── requirements.txt      # Python dependencies
+├── .env.example          # Template configuration
 │
-├── extractors/          # Site extractors
+├── extractors/           # Extraction logic
 │   ├── __init__.py
-│   └── hianime.py       # HiAnime scraper and data classes
+│   ├── hianime.py        # Base extractor & model dataclasses
+│   └── kickassanime.py   # KAA-specific API parsing & decoders
 │
-└── tools/               # Utilities
+└── tools/                # Utilities
     ├── __init__.py
-    ├── functions.py     # Helper functions (input, file ops)
-    ├── logger.py        # yt-dlp output logger
-    └── thread_logger.py # Thread-aware logging system
+    ├── functions.py      # Console input handlers & file operations
+    └── thread_logger.py  # Synchronized console logging
 ```
 
-## Output Structure
+---
 
-```text
-output/
-└── Anime Name (Sub)/
-    ├── Anime Name_episodes.csv    # Episode list
-    ├── Anime Name_metadata.json   # Anime metadata
-    ├── Anime Name - S01E01.mkv    # Video with embedded subs
-    ├── Anime Name - S01E02.mkv
-    └── ...
-```
+## 🤝 Acknowledgements
 
-## Notes
-
-- Episode IDs are scraped from the page, not generated sequentially
-- Subtitles are embedded with `default+forced` disposition (auto-play in players)
-- Output format is MKV for subtitle compatibility
-- Use `--fetch-only` to just get episode URLs without downloading
-- Graceful shutdown on Ctrl+C - waits for current downloads to complete
-- Single-episode content (movies/OVAs) automatically skips episode numbering
-
-## Acknowledgements
-
-Special thanks to the original creators whose work this project is based on:
-
-- **Main Codebase**: [HianimeDownloader](https://github.com/gheatherington/HianimeDownloader) by [@gheatherington](https://github.com/gheatherington)
-- **yt-dlp Plugin**: [yt-dlp-hianime](https://github.com/pratikpatel8982/yt-dlp-hianime) by [@pratikpatel8982](https://github.com/pratikpatel8982)
+Special thanks to the original creators whose repositories laid the foundation for this fork:
+*   **Base Codebase**: [HianimeDownloader](https://github.com/gheatherington/HianimeDownloader) by [@gheatherington](https://github.com/gheatherington)
+*   **yt-dlp Plugin**: [yt-dlp-hianime](https://github.com/pratikpatel8982/yt-dlp-hianime) by [@pratikpatel8982](https://github.com/pratikpatel8982)
