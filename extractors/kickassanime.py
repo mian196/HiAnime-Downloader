@@ -145,8 +145,7 @@ class KickAssAnimeExtractor:
 
     def select_anime_interactive(self, query: str = None) -> Optional[Anime]:
         try:
-            from tools.ui import print_banner, print_search_results
-            print_banner()
+            from tools.ui import print_search_results
             if not query:
                 query = input("Enter anime name to search: ").strip()
                 if not query:
