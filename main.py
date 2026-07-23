@@ -11,6 +11,7 @@ import re
 import requests
 from queue import Queue, Empty
 from typing import List, Optional
+from functools import lru_cache
 
 from colorama import init, Fore, Style
 
@@ -35,6 +36,10 @@ from config import (
     ANIME_URL_QUEUE,
     LOG_LEVEL,
     LOG_TIMESTAMPS,
+    get_global_config_path,
+    get_local_config_path,
+    init_global_config,
+    print_config,
 )
 
 from tools.thread_logger import (
@@ -44,7 +49,7 @@ from tools.thread_logger import (
     get_main_logger,
 )
 from extractors import KickAssAnimeExtractor
-from extractors.hianime import Episode, Anime
+from extractors.models import Episode, Anime
 from tools.functions import (
     get_confirmation,
     get_int_in_range,
@@ -54,6 +59,7 @@ from tools.functions import (
     print_success,
     print_error,
     print_warning,
+    parse_episode_expression,
 )
 
 
@@ -197,12 +203,6 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
             episode.status = "skipped"
             return episode
 
-    with download_throttle_lock:
-        elapsed = time.time() - last_download_time
-        if elapsed < DOWNLOAD_DELAY:
-            time.sleep(DOWNLOAD_DELAY - elapsed)
-        last_download_time = time.time()
-
     # Ensure episode has output_dir set for subtitle extraction
     episode.output_dir = output_dir
 
@@ -235,7 +235,7 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
                     cmd.extend(['--add-header', f"{k}:{v}"])
             cmd.append(episode.m3u8_url)
         else:
-            # Fallback to original Hianime logic if m3u8 was not resolved
+            # Fallback to direct download logic if m3u8 was not resolved
             cmd = [
                 'yt-dlp', '-f', f'{audio_type}_{resolution}p',
                 '--write-subs', '--sub-lang', SUBTITLE_LANG, '--convert-subs', 'srt',
@@ -282,6 +282,7 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
     return episode
 
 
+@lru_cache(maxsize=128)
 def fetch_mal_id(anime_name: str, is_movie: bool = False) -> Optional[int]:
     import requests
     # Search Jikan API for the anime
@@ -459,7 +460,7 @@ def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
         cmd.extend(['-map', '0:v:0', '-map', '0:a?'])
         if has_subs:
             cmd.extend(['-map', '1:0'])
-            cmd.extend(['-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default+forced'])
+            cmd.extend(['-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default'])
 
         if has_chapters:
             metadata_idx = 2 if has_subs else 1
@@ -588,7 +589,7 @@ def download_from_episodes(
 
 
 def fetch_anime_to_csv(
-    extractor: HianimeExtractor,
+    extractor: KickAssAnimeExtractor,
     anime: Anime,
     output_dir: str,
     start_ep: int = 1,
@@ -918,21 +919,48 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}  HiAnime Downloader{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}  KickAssAnime Downloader{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
 
-    parser = argparse.ArgumentParser(description="HiAnime Downloader")
+    parser = argparse.ArgumentParser(description="KickAssAnime Downloader")
     parser.add_argument('-u', '--url', help='Anime URL')
     parser.add_argument('-s', '--search', help='Search anime by name')
     parser.add_argument('-o', '--output', default=DEFAULT_OUTPUT_DIR, help='Output directory')
     parser.add_argument('--from-csv', dest='from_csv', help='Download from existing CSV file')
     parser.add_argument('--fetch-only', action='store_true', help='Only fetch URLs to CSV, no download')
-    parser.add_argument('--download-workers', type=int, default=MAX_DOWNLOAD_WORKERS)
-    parser.add_argument('--embed-workers', type=int, default=MAX_EMBED_WORKERS)
-    parser.add_argument('--resolution', default=RESOLUTION)
-    parser.add_argument('--audio-type', choices=['sub', 'dub'], default='sub')
-    parser.add_argument('--season', type=int, default=None, help='Season number (auto-detected from title if not specified)')
+    parser.add_argument('--download-workers', type=int, default=MAX_DOWNLOAD_WORKERS, help='Parallel download threads')
+    parser.add_argument('--embed-workers', type=int, default=MAX_EMBED_WORKERS, help='Parallel embed processes')
+    parser.add_argument('--resolution', default=RESOLUTION, help='Video resolution (720 or 1080)')
+    parser.add_argument('--audio-type', choices=['sub', 'dub'], default=AUDIO_TYPE, help='Audio format (sub or dub)')
+    parser.add_argument('-e', '--episodes', help='Episodes to download (e.g. 5, 1-5, 3-, all)')
+    parser.add_argument('--filename-format', choices=['episode', 'season', 'short', 'standard', 'full'], default=FILENAME_FORMAT, help='Filename formatting format')
+    parser.add_argument('--download-delay', type=float, default=DOWNLOAD_DELAY, help='Delay between downloads in seconds')
+    parser.add_argument('--no-subtitles', action='store_true', default=NO_SUBTITLES, help='Disable subtitle extraction/embedding')
+    parser.add_argument('--url-file', help='Path to text file containing anime URLs (one per line)')
+    
+    # Subcommands
+    subparsers = parser.add_subparsers(dest='command', help='Subcommands')
+    config_parser = subparsers.add_parser('config', help='Manage configuration')
+    config_parser.add_argument('--init', action='store_true', help='Initialize default config.yaml at global OS config path')
+    config_parser.add_argument('--path', action='store_true', help='Print active configuration file paths')
+    config_parser.add_argument('--show', action='store_true', help='Show active resolved configuration')
+
     args = parser.parse_args()
+
+    # Handle config subcommand
+    if args.command == 'config':
+        if args.init:
+            path = init_global_config(overwrite=True)
+            print_success(f"Initialized global configuration file at: {path}")
+        elif args.path:
+            g_path = get_global_config_path()
+            l_path = get_local_config_path()
+            print(f"Global Config Path: {g_path} {'[Exists]' if g_path.exists() else '[Not Found]'}")
+            if l_path:
+                print(f"Local Config Path:  {l_path} [Exists]")
+        else:
+            print_config()
+        return
 
     if args.from_csv:
         print_info(f"Loading episodes from: {args.from_csv}")
@@ -1004,28 +1032,15 @@ def main():
 
 
         max_eps = anime.sub_episodes if anime.download_type == 'sub' else anime.dub_episodes
-        if DOWNLOAD_ALL:
+        if args.episodes:
+            start_ep, end_ep = parse_episode_expression(args.episodes, max_eps)
+        elif DOWNLOAD_ALL:
             start_ep, end_ep = 1, max_eps or 9999
         else:
             print(f"\n{Fore.GREEN}Episodes available: 1 to {max_eps}{Style.RESET_ALL}")
-            print(f"  {Fore.CYAN}1. Download all episodes (1-{max_eps}){Style.RESET_ALL}")
-            print(f"  {Fore.CYAN}2. Download single episode{Style.RESET_ALL}")
-            print(f"  {Fore.CYAN}3. Download from episode X to last episode{Style.RESET_ALL}")
-            print(f"  {Fore.CYAN}4. Download specific range (X-Y){Style.RESET_ALL}")
-            
-            option = get_int_in_range(f"\n{Fore.CYAN}Select option (1-4): {Style.RESET_ALL}", 1, 4)
-            
-            if option == 1:
-                start_ep, end_ep = 1, max_eps or 9999
-            elif option == 2:
-                start_ep = get_int_in_range(f"{Fore.CYAN}Enter episode number to download: {Style.RESET_ALL}", 1, max_eps or 9999)
-                end_ep = start_ep
-            elif option == 3:
-                start_ep = get_int_in_range(f"{Fore.CYAN}Start download from episode: {Style.RESET_ALL}", 1, max_eps or 9999)
-                end_ep = max_eps or 9999
-            else:
-                start_ep = get_int_in_range(f"{Fore.CYAN}Start episode: {Style.RESET_ALL}", 1, max_eps or 9999)
-                end_ep = get_int_in_range(f"{Fore.CYAN}End episode: {Style.RESET_ALL}", start_ep, max_eps or 9999)
+            user_expr = input(f"{Fore.CYAN}Select episodes [Default: all (1-{max_eps}), e.g. 5, 1-5, 3-]: {Style.RESET_ALL}").strip()
+            start_ep, end_ep = parse_episode_expression(user_expr, max_eps)
+
 
 
         output_dir = os.path.join(args.output, f"{anime.name} ({anime.download_type.title()})")
@@ -1077,16 +1092,26 @@ def main():
         return True
 
     try:
+        url_queue = ANIME_URL_QUEUE
+        if args.url_file:
+            if os.path.exists(args.url_file):
+                with open(args.url_file, 'r', encoding='utf-8') as f:
+                    url_queue = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+                print_info(f"Loaded {len(url_queue)} URLs from {args.url_file}")
+            else:
+                print_error(f"URL file not found: {args.url_file}")
+                return
+
         if args.search:
             anime = extractor.select_anime_interactive(args.search)
             if anime:
                 process_single_anime(anime.url)
         elif args.url:
             process_single_anime(args.url)
-        elif ANIME_URL_QUEUE:
-            queue_total = len(ANIME_URL_QUEUE)
+        elif url_queue:
+            queue_total = len(url_queue)
             print_info(f"Found {queue_total} URLs in queue")
-            for i, url in enumerate(ANIME_URL_QUEUE, 1):
+            for i, url in enumerate(url_queue, 1):
                 print(f"  {i}. {url}")
 
             if not get_confirmation(f"\nProcess all {queue_total} URLs? (y/n): "):
@@ -1099,7 +1124,7 @@ def main():
             series = []  # List of urls
             failed_urls = []
 
-            for url in ANIME_URL_QUEUE:
+            for url in url_queue:
                 if shutdown_event.is_set():
                     break
                 is_single, anime = is_single_episode_anime(extractor, url)
