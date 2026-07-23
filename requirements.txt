@@ -5,6 +5,7 @@ colorama>=0.4.6
 python-dotenv>=1.0.0
 PyYAML>=6.0
 platformdirs>=4.0.0
+rich>=13.0.0
 
 
 # Selenium fallback (for difficult pages or m3u8 capture)

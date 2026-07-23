@@ -144,34 +144,28 @@ class KickAssAnimeExtractor:
             return []
 
     def select_anime_interactive(self, query: str = None) -> Optional[Anime]:
-        clear_screen()
-        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}  KickAssAnime Downloader - Search{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
-
-        if not query:
-            query = input(f"{Fore.CYAN}Enter anime name to search: {Style.RESET_ALL}").strip()
+        try:
+            from tools.ui import print_banner, print_search_results
+            print_banner()
             if not query:
+                query = input("Enter anime name to search: ").strip()
+                if not query:
+                    return None
+
+            anime_list = self.search_anime(query)
+            if not anime_list:
                 return None
 
-        anime_list = self.search_anime(query)
-        if not anime_list:
-            return None
-
-        print(f"\n{Fore.GREEN}Search Results:{Style.RESET_ALL}\n")
-        for i, anime in enumerate(anime_list, 1):
-            sub_info = f"{Fore.YELLOW}{anime.sub_episodes}{Style.RESET_ALL} sub"
-            dub_info = f"{Fore.YELLOW}{anime.dub_episodes}{Style.RESET_ALL} dub"
-            print(f"  {Fore.RED}{i:2}{Style.RESET_ALL}: {Fore.CYAN}{anime.name}{Style.RESET_ALL}")
-            print(f"      Episodes: {sub_info} / {dub_info}")
-
-        selection = get_int_in_range(
-            f"\n{Fore.CYAN}Select anime (1-{len(anime_list)}): {Style.RESET_ALL}",
-            1,
-            len(anime_list)
-        )
-
-        return anime_list[selection - 1]
+            return print_search_results(anime_list)
+        except Exception:
+            if not query:
+                query = input("Enter anime name to search: ").strip()
+                if not query:
+                    return None
+            anime_list = self.search_anime(query)
+            if not anime_list:
+                return None
+            return anime_list[0]
 
     def get_anime_from_url(self, url: str) -> Optional[Anime]:
         print_info(f"Fetching anime info from URL...")

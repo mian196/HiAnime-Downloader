@@ -918,9 +918,11 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}  KickAssAnime Downloader{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    try:
+        from tools.ui import print_banner
+        print_banner()
+    except Exception:
+        pass
 
     parser = argparse.ArgumentParser(description="KickAssAnime Downloader")
     parser.add_argument('-u', '--url', help='Anime URL')
@@ -1055,13 +1057,19 @@ def main():
                 print_error("Failed to fetch episodes")
             return True
 
-        print(f"\n{Fore.YELLOW}Summary:{Style.RESET_ALL}")
-        print(f"  Anime: {anime.name}")
-        print(f"  Season: {anime.season_number}")
-        print(f"  Episodes: {start_ep} - {end_ep}")
-        print(f"  Type: {anime.download_type}")
-        print(f"  Resolution: {args.resolution}p")
-        print(f"  Mode: Parallel scrape + download")
+        try:
+            from tools.ui import print_summary_card
+            print_summary_card(
+                anime.name,
+                anime.season_number,
+                start_ep,
+                end_ep,
+                anime.download_type,
+                args.resolution,
+                output_dir,
+            )
+        except Exception:
+            print(f"\nSummary: {anime.name} S{anime.season_number:02d} EP{start_ep:02d}-{end_ep:02d} [{anime.download_type} {args.resolution}p]")
 
         if not is_queue and not get_confirmation("\nStart? (y/n): "):
             print_info("Cancelled.")

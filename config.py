@@ -212,29 +212,15 @@ HEADERS = {
 
 
 def print_config(active_config: Optional[Dict[str, Any]] = None):
-    from colorama import Fore, Style
-
-    cfg = active_config or _cfg
-    global_path = get_global_config_path()
-    local_path = get_local_config_path()
-
-    print(f"\n{Fore.CYAN}Active Configuration:{Style.RESET_ALL}")
-    print(f"  Config Path (Global): {global_path} {'[Exists]' if global_path.exists() else '[Not Found]'}")
-    if local_path:
-        print(f"  Config Path (Local Override): {local_path}")
-    print(f"  Download Workers: {cfg.get('download_workers')}")
-    print(f"  Embed Workers: {cfg.get('embed_workers')}")
-    print(f"  Output Dir: {cfg.get('output_dir')}")
-    print(f"  Resolution: {cfg.get('resolution')}p")
-    print(f"  Audio Type: {cfg.get('audio_type')}")
-    print(f"  Subtitle Lang: {cfg.get('subtitle_lang')}")
-    print(f"  Download Delay: {cfg.get('download_delay')}s")
-    print(f"  Download All: {cfg.get('download_all')}")
-    print(f"  Embed Chapters: {cfg.get('embed_chapters')}")
-    print(f"  Filename Format: {cfg.get('filename_format')}")
-    print(f"  Verbose: {cfg.get('verbose')}")
-    print(f"  Log Level: {cfg.get('log_level')}")
-    print(f"  Log Timestamps: {cfg.get('log_timestamps')}")
-    if ANIME_URL_QUEUE:
-        print(f"  URLs in Queue: {len(ANIME_URL_QUEUE)}")
-    print()
+    try:
+        from tools.ui import print_config_table
+        cfg = active_config or _cfg
+        global_path = get_global_config_path()
+        local_path = get_local_config_path()
+        print_config_table(cfg, global_path, local_path)
+    except Exception:
+        cfg = active_config or _cfg
+        print(f"Download Workers: {cfg.get('download_workers')}")
+        print(f"Embed Workers: {cfg.get('embed_workers')}")
+        print(f"Output Dir: {cfg.get('output_dir')}")
+        print(f"Resolution: {cfg.get('resolution')}p")
