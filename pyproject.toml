@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kaa-downloader"
+version = "1.0.0"
+description = "State-of-the-art parallel downloader for KickAssAnime (kaa.lt) with subtitle embedding"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "mian196" }
+]
+keywords = ["anime", "downloader", "kickassanime", "kaa", "mkv", "subtitles"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+]
+
+dependencies = [
+    "beautifulsoup4>=4.12.0",
+    "requests>=2.31.0",
+    "colorama>=0.4.6",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0",
+    "platformdirs>=4.0.0",
+    "selenium>=4.15.0",
+    "selenium-wire>=5.1.0",
+    "selenium-stealth>=1.0.6",
+    "langdetect>=1.0.9",
+]
+
+[project.scripts]
+kaa = "main:main"
+kaa-downloader = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "config"]
+packages = ["extractors", "tools"]
