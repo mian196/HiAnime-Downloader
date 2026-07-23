@@ -111,6 +111,31 @@ logging:
     return target_path
 
 
+def check_first_run() -> bool:
+    """Check if global configuration file exists. Prompts user to run setup wizard if missing."""
+    global_path = get_global_config_path()
+    local_path = get_local_config_path()
+    if global_path.exists() or local_path is not None:
+        return False
+
+    try:
+        from rich.prompt import Confirm
+        from rich.console import Console
+        c = Console()
+        c.print()
+        c.print(f"[bold yellow]No configuration file found[/bold yellow] at [underline]{global_path}[/underline]")
+        run_wizard = Confirm.ask("Would you like to run the Interactive Configuration Wizard now?", default=True)
+        if run_wizard:
+            from tools.ui import run_config_wizard
+            run_config_wizard()
+        else:
+            init_global_config()
+        return True
+    except Exception:
+        init_global_config()
+        return True
+
+
 def load_config() -> Dict[str, Any]:
     """
     Load resolved configuration based on priority:

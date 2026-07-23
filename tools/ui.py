@@ -167,3 +167,108 @@ def create_progress_bar() -> Progress:
         console=console,
         expand=False,
     )
+
+
+def run_config_wizard() -> Path:
+    """Guided TUI Configuration Wizard."""
+    from config import get_global_config_path, DEFAULT_CONFIG
+    import yaml
+
+    console.print()
+    wizard_panel = Panel(
+        "[bold cyan]KAA Downloader Setup Wizard[/bold cyan]\n"
+        "Configure your preferred settings. Press [bold green]Enter[/bold green] on any prompt to accept default.",
+        title="⚙️ Configuration Setup",
+        box=box.ROUNDED,
+        border_style="magenta",
+        padding=(1, 2),
+    )
+    console.print(wizard_panel)
+    console.print()
+
+    # 1. Workers & Threads
+    download_workers = IntPrompt.ask(
+        "[bold white]Parallel Download Threads[/bold white] (1-16)",
+        default=DEFAULT_CONFIG["download_workers"],
+    )
+    embed_workers = IntPrompt.ask(
+        "[bold white]Parallel Subtitle Muxing Processes[/bold white] (1-8)",
+        default=DEFAULT_CONFIG["embed_workers"],
+    )
+
+    # 2. Preferred Video Quality & Language
+    resolution = Prompt.ask(
+        "[bold white]Preferred Video Resolution[/bold white]",
+        choices=["720", "1080"],
+        default=DEFAULT_CONFIG["resolution"],
+    )
+    audio_type = Prompt.ask(
+        "[bold white]Preferred Audio Language[/bold white]",
+        choices=["sub", "dub"],
+        default=DEFAULT_CONFIG["audio_type"],
+    )
+    subtitle_lang = Prompt.ask(
+        "[bold white]Subtitle Language Code[/bold white]",
+        default=DEFAULT_CONFIG["subtitle_lang"],
+    )
+
+    # 3. Output Directory & Filename Format
+    output_dir = Prompt.ask(
+        "[bold white]Default Output Directory[/bold white]",
+        default=DEFAULT_CONFIG["output_dir"],
+    )
+    filename_format = Prompt.ask(
+        "[bold white]Filename Format[/bold white]",
+        choices=["episode", "season", "short", "standard", "full"],
+        default=DEFAULT_CONFIG["filename_format"],
+    )
+
+    # 4. Features & Toggles
+    embed_chapters = Confirm.ask(
+        "[bold white]Embed Opening/Ending Chapter Skip Times?[/bold white]",
+        default=DEFAULT_CONFIG["embed_chapters"],
+    )
+    download_delay = float(Prompt.ask(
+        "[bold white]Download Throttle Delay (seconds)[/bold white]",
+        default=str(DEFAULT_CONFIG["download_delay"]),
+    ))
+
+    # Construct YAML content
+    config_dict = {
+        "download": {
+            "download_workers": download_workers,
+            "embed_workers": embed_workers,
+            "resolution": resolution,
+            "audio_type": audio_type,
+            "subtitle_lang": subtitle_lang,
+            "download_delay": download_delay,
+            "download_timeout": 3600,
+            "embed_timeout": 600,
+            "download_all": True,
+            "no_subtitles": False,
+            "embed_chapters": embed_chapters,
+            "default_season": 0,
+        },
+        "output": {
+            "output_dir": output_dir,
+            "filename_format": filename_format,
+        },
+        "logging": {
+            "verbose": True,
+            "log_level": "INFO",
+            "log_timestamps": True,
+        }
+    }
+
+    target_path = get_global_config_path()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(target_path, "w", encoding="utf-8") as f:
+        yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+
+    console.print()
+    print_success(f"Configuration saved successfully to: [bold underline]{target_path}[/bold underline]")
+    console.print()
+
+    return target_path
+

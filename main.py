@@ -39,6 +39,7 @@ from config import (
     get_global_config_path,
     get_local_config_path,
     init_global_config,
+    check_first_run,
     print_config,
 )
 
@@ -924,6 +925,8 @@ def main():
     except Exception:
         pass
 
+    check_first_run()
+
     parser = argparse.ArgumentParser(description="KickAssAnime Downloader")
     parser.add_argument('-u', '--url', help='Anime URL')
     parser.add_argument('-s', '--search', help='Search anime by name')
@@ -943,6 +946,8 @@ def main():
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Subcommands')
     config_parser = subparsers.add_parser('config', help='Manage configuration')
+    config_parser.add_argument('action', nargs='?', choices=['wizard', 'init', 'show', 'path'], help='Config action')
+    config_parser.add_argument('--wizard', action='store_true', help='Run interactive TUI setup wizard')
     config_parser.add_argument('--init', action='store_true', help='Initialize default config.yaml at global OS config path')
     config_parser.add_argument('--path', action='store_true', help='Print active configuration file paths')
     config_parser.add_argument('--show', action='store_true', help='Show active resolved configuration')
@@ -951,10 +956,13 @@ def main():
 
     # Handle config subcommand
     if args.command == 'config':
-        if args.init:
+        if args.action == 'wizard' or args.wizard:
+            from tools.ui import run_config_wizard
+            run_config_wizard()
+        elif args.action == 'init' or args.init:
             path = init_global_config(overwrite=True)
             print_success(f"Initialized global configuration file at: {path}")
-        elif args.path:
+        elif args.action == 'path' or args.path:
             g_path = get_global_config_path()
             l_path = get_local_config_path()
             print(f"Global Config Path: {g_path} {'[Exists]' if g_path.exists() else '[Not Found]'}")
@@ -1213,17 +1221,27 @@ def main():
             print(f"Success: {success_count}")
             print(f"Failed: {fail_count}")
         else:
-            print(f"{Fore.CYAN}1. Search anime{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}2. Enter URL{Style.RESET_ALL}")
-            choice = get_int_in_range("\nSelect: ", 1, 2)
+            print(f"  {Fore.CYAN}1. 🔍 Search anime by name{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}2. 🔗 Enter URL or batch file{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}3. ⚙️  Configure settings (TUI Setup Wizard){Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}4. 📄 Show active configuration{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}5. ❌ Exit{Style.RESET_ALL}")
+            choice = get_int_in_range("\nSelect choice (1-5): ", 1, 5)
             if choice == 1:
                 anime = extractor.select_anime_interactive()
                 if anime:
                     process_single_anime(anime.url)
-            else:
+            elif choice == 2:
                 url = input("Enter URL: ").strip()
                 if url:
                     process_single_anime(url)
+            elif choice == 3:
+                from tools.ui import run_config_wizard
+                run_config_wizard()
+            elif choice == 4:
+                print_config()
+            else:
+                return
 
     finally:
         extractor.cleanup()
