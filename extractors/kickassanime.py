@@ -25,7 +25,7 @@ from tools.functions import (
     clear_screen,
 )
 
-from extractors.hianime import Anime, Episode, extract_season_from_name
+from extractors.models import Anime, Episode, extract_season_from_name
 
 try:
     from selenium import webdriver
@@ -352,49 +352,71 @@ class KickAssAnimeExtractor:
             if not player_src:
                 print_error(f"EP{episode.number:02d}: Player source URL not found")
                 return None
-                
-            options = webdriver.ChromeOptions()
-            options.add_argument("--headless")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--log-level=3")
-            options.add_argument("--silent")
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
-            
-            driver = webdriver.Chrome(options=options)
-            
+
             m3u8_url = None
             vtt_url = None
-            
+
+            # Fast direct HTTP GET attempt on player_src
             try:
-                driver.get(player_src)
-                attempt = 0
-                while (not m3u8_url or (not vtt_url and not self.no_subtitles)) and attempt < 12:
-                    time.sleep(1)
-                    attempt += 1
-                    
-                    logs = driver.get_log('performance')
-                    for entry in logs:
-                        try:
-                            log_data = json.loads(entry['message'])['message']
-                            method = log_data.get('method')
-                            
-                            url_candidate = None
-                            if method == 'Network.requestWillBeSent':
-                                url_candidate = log_data['params']['request']['url']
-                            elif method == 'Network.responseReceived':
-                                url_candidate = log_data['params']['response']['url']
+                player_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": episode.url,
+                }
+                resp_p = requests.get(player_src, headers=player_headers, timeout=10)
+                if resp_p.status_code == 200:
+                    p_text = resp_p.text.replace('\\u002F', '/').replace('\\/', '/')
+                    m3u8_match = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*master[^\s"\'<>]*)', p_text)
+                    if not m3u8_match:
+                        m3u8_match = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', p_text)
+                    if m3u8_match:
+                        m3u8_url = m3u8_match.group(1)
+
+                    vtt_match = re.search(r'(https?://[^\s"\'<>]+\.vtt[^\s"\'<>]*)', p_text)
+                    if vtt_match and 'thumbnail' not in vtt_match.group(1).lower():
+                        vtt_url = vtt_match.group(1)
+            except Exception:
+                pass
+
+            # Fallback to Selenium Chrome only if direct HTTP GET did not extract m3u8_url
+            if not m3u8_url and SELENIUM_AVAILABLE:
+                options = webdriver.ChromeOptions()
+                options.add_argument("--headless")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--log-level=3")
+                options.add_argument("--silent")
+                options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+                
+                driver = webdriver.Chrome(options=options)
+                try:
+                    driver.get(player_src)
+                    attempt = 0
+                    while (not m3u8_url or (not vtt_url and not self.no_subtitles)) and attempt < 12:
+                        time.sleep(1)
+                        attempt += 1
+                        
+                        logs = driver.get_log('performance')
+                        for entry in logs:
+                            try:
+                                log_data = json.loads(entry['message'])['message']
+                                method = log_data.get('method')
                                 
-                            if url_candidate:
-                                if not m3u8_url and '.m3u8' in url_candidate and 'master' in url_candidate:
-                                    m3u8_url = url_candidate
-                                if not vtt_url and '.vtt' in url_candidate and 'thumbnail' not in url_candidate:
-                                    vtt_url = url_candidate
-                        except Exception:
-                            pass
-            finally:
-                driver.quit()
+                                url_candidate = None
+                                if method == 'Network.requestWillBeSent':
+                                    url_candidate = log_data['params']['request']['url']
+                                elif method == 'Network.responseReceived':
+                                    url_candidate = log_data['params']['response']['url']
+                                    
+                                if url_candidate:
+                                    if not m3u8_url and '.m3u8' in url_candidate and 'master' in url_candidate:
+                                        m3u8_url = url_candidate
+                                    if not vtt_url and '.vtt' in url_candidate and 'thumbnail' not in url_candidate:
+                                        vtt_url = url_candidate
+                            except Exception:
+                                pass
+                finally:
+                    driver.quit()
                 
             if not m3u8_url:
                 print_error(f"EP{episode.number:02d}: Master m3u8 URL could not be resolved.")
