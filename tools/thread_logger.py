@@ -97,7 +97,7 @@ class ThreadLogger:
             if cls._initialized:
                 return
 
-            cls._root_logger = logging.getLogger('hianime')
+            cls._root_logger = logging.getLogger('kaa')
             cls._root_logger.setLevel(level)
             cls._root_logger.handlers.clear()
 
@@ -124,7 +124,7 @@ class ThreadLogger:
             cls.initialize()
 
         if name:
-            return logging.getLogger(f'hianime.{name}')
+            return logging.getLogger(f'kaa.{name}')
         return cls._root_logger
 
 

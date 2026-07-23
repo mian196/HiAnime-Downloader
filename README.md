@@ -14,72 +14,96 @@ A state-of-the-art, high-performance parallel downloader for **kaa.lt** (KickAss
 ## ✨ Features
 
 - **🚀 3-Stage Parallel Pipeline** — Scraping, downloading, and embedding run concurrently on separate workers.
+- **📦 Global Pip Executable** — Install as a system CLI tool and run `kaa` from any directory.
+- **⚙️ YAML Configuration System** — OS-aware configuration file management (`config.yaml`) with CLI subcommands (`kaa config`).
 - **⏱️ Dynamic Chapter Skip Times** — Integrates Jikan & AniSkip APIs to automatically embed `Opening` and `Ending` timestamps as chapters into the final video (compatible with VLC, MPV, MPC-HC, etc.).
 - **💬 Auto Subtitle Embedding** — Subtitles are downloaded as `.vtt`, natively converted to `.srt`, and multiplexed into the `.mkv` file with `default+forced` flags.
-- **🔍 Interactive Search & Range Selection** — Search for anime by name directly in the terminal, and choose custom download ranges (e.g. single episode, starting from episode X, or range X to Y).
-- **🎛️ Configurable Filenames** — Choose from 5 different naming conventions (`standard`, `full`, `short`, `season`, `episode`) to match your media server structure (e.g. Plex, Jellyfin).
-- **🚦 Smart Rate Limiting & Timeouts** — Configurable request delays and HLS fragment socket timeouts to prevent rate limits and terminal hangs.
+- **🔍 Interactive Search & Range Selection** — Search for anime by name directly in the terminal, or download from custom URL batch files.
+- **🎛️ Configurable Filenames** — Choose from 5 different naming conventions (`standard`, `full`, `short`, `season`, `episode`) to match media servers (Plex, Jellyfin).
+- **🚦 Smart Rate Limiting & Timeouts** — Configurable request delays and socket timeouts to prevent rate limits.
 - **🛡️ Graceful Interrupts** — Responds to `Ctrl+C` by finishing current downloads before exiting safely.
 
 ---
 
-## 📐 Pipeline Architecture
-
-```text
-  ┌─────────────────────────────────────────────────────────────┐
-  │                    PARALLEL EXECUTION MODEL                 │
-  ├─────────────────────────────────────────────────────────────┤
-  │                                                             │
-  │  [SCRAPER THREAD]     [DOWNLOAD WORKERS]    [EMBED WORKERS] │
-  │        │                      │                     │       │
-  │  Scrapes URLs  ───▶  [Download Queue]               │       │
-  │  (Details API)                │                     │       │
-  │                        Worker 1 (yt-dlp)            │       │
-  │                        Worker 2 (yt-dlp) ──▶  [Embed Queue] │
-  │                               ▼                     │       │
-  │                        (Raw MP4 Streams)       Worker 1     │
-  │                                                Worker 2     │
-  │                                                     ▼       │
-  │                                              (FFmpeg Muxing)│
-  │                                                     ▼       │
-  │                                              (Final .mkv)   │
-  └─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🛠️ Quick Start
+## 🛠️ Installation
 
 ### 1. Install System Dependencies (Windows)
 
 ```powershell
-# Install Python 3.13
+# Install Python 3.8+
 winget install Python.Python.3.13
 
 # Install FFmpeg (required for muxing and chapters)
 winget install Gyan.FFmpeg
 ```
 
-### 2. Set Up Virtual Environment & Dependencies
+### 2. Install via Pip (Global CLI Tool)
+
+Install directly from GitHub as a global executable:
 
 ```bash
-# Clone the repository
-git clone git@github.com:mian196/KAA-Downloader.git
-cd KAA-Downloader
-
-# Create and activate venv
-python -m venv .venv
-.venv\Scripts\activate
-
-# Install requirements
-pip install -r requirements.txt
+pip install git+https://github.com/mian196/KAA-Downloader.git
 ```
 
-### 3. Initialize Configuration
+Once installed, you can run `kaa` or `kaa-downloader` from any terminal prompt!
 
-Copy the example configuration to create your local `.env`:
+---
+
+## ⚙️ Configuration Management (`config.yaml`)
+
+The downloader automatically resolves configuration using a **5-tier priority hierarchy**:
+
+```text
+High Priority
+  ├── 1. Command-Line Arguments  (e.g., --workers 8 --resolution 1080)
+  ├── 2. Environment Variables   (e.g., KAA_DOWNLOAD_WORKERS=8)
+  ├── 3. Local Config File       (./config.yaml in current working directory)
+  ├── 4. Global User Config      (OS-standard path via platformdirs)
+  └── 5. Built-in Defaults       (Hardcoded fallback values)
+Low Priority
+```
+
+### 📍 OS Global Config Paths
+- **Windows**: `%APPDATA%\kaa-downloader\config.yaml`
+- **Linux / macOS**: `~/.config/kaa-downloader/config.yaml`
+
+### 🎛️ CLI Config Management Subcommands
+
 ```bash
-cp .env.example .env
+# Initialize or reset the global config.yaml file
+kaa config --init
+
+# Show active global & local configuration file paths
+kaa config --path
+
+# Display active resolved configuration settings
+kaa config --show
+```
+
+### 📄 `config.yaml` Example Schema
+
+```yaml
+download:
+  download_workers: 6      # Parallel download threads
+  embed_workers: 4         # Parallel FFmpeg subtitle embedding processes
+  resolution: "720"        # Video resolution (720, 1080)
+  audio_type: "sub"        # Audio format (sub, dub)
+  subtitle_lang: "en"      # Subtitle language code
+  download_delay: 2.0      # Throttle delay between downloads in seconds
+  download_timeout: 3600   # Max download timeout per episode in seconds
+  embed_timeout: 600       # Max embed timeout per episode in seconds
+  download_all: true       # Download all episodes by default
+  no_subtitles: false      # Disable subtitle extraction/embedding
+  embed_chapters: true     # Embed skip-time chapters into MKV container
+
+output:
+  output_dir: "output"     # Default directory for saved videos
+  filename_format: "standard" # Options: episode, season, short, standard, full
+
+logging:
+  verbose: true            # Show detailed worker logs
+  log_level: "INFO"        # Options: DEBUG, INFO, WARNING, ERROR
+  log_timestamps: true     # Include timestamps in console log output
 ```
 
 ---
@@ -89,51 +113,33 @@ cp .env.example .env
 ### 📱 Interactive Command Center
 Simply launch the program without arguments to search for anime or enter custom URLs:
 ```bash
-python main.py
+kaa
 ```
 
 ### 🔍 Search by Name
 ```bash
-python main.py -s "Horimiya"
+kaa -s "Horimiya"
 ```
 
 ### 🔗 Direct URL Download
 ```bash
-python main.py -u "https://kaa.lt/horimiya-1e9c"
+kaa -u "https://kaa.lt/horimiya-1e9c" --resolution 1080 --audio-type sub
+```
+
+### 📄 Download from URL Batch File
+```bash
+kaa --url-file urls.txt
 ```
 
 ### 📋 Scrape URLs Only (CSV Export)
 ```bash
-python main.py -u "https://kaa.lt/horimiya-1e9c" --fetch-only
+kaa -u "https://kaa.lt/horimiya-1e9c" --fetch-only
 ```
 
 ### 📂 Resume Download from CSV
 ```bash
-python main.py --from-csv "output/Horimiya (Sub)/Horimiya_episodes.csv"
+kaa --from-csv "output/Horimiya (Sub)/Horimiya_episodes.csv"
 ```
-
----
-
-## ⚙️ Configuration Options (`.env`)
-
-Every aspect of the downloader is customizable via settings inside the `.env` file:
-
-| Parameter | Default | Description |
-| :--- | :--- | :--- |
-| **ANIME_URL** | `None` | If set, skips the interactive input and starts downloads immediately. |
-| **ANIME_URLS** | `None` | Comma-separated list of URLs to process sequentially in queue mode. |
-| **DOWNLOAD_WORKERS** | `6` | Number of concurrent `yt-dlp` download processes. |
-| **EMBED_WORKERS** | `4` | Number of concurrent `FFmpeg` subtitle/chapter muxers. |
-| **OUTPUT_DIR** | `output` | Directory where downloaded anime folders are stored. |
-| **DOWNLOAD_ALL** | `false` | If `false`, prompts you for custom episode ranges (all, single, start X, range X-Y). |
-| **VERBOSE** | `true` | Outputs real-time progress and logs from `yt-dlp`. |
-| **LOG_LEVEL** | `INFO` | Level of terminal verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
-| **RESOLUTION** | `720` | Desired video quality (`720`, `1080`). |
-| **AUDIO_TYPE** | `sub` | Language track to extract (`sub` for Japanese, `dub` for English). |
-| **EMBED_CHAPTERS** | `true` | Enables AniSkip skip-time chapter embedding in output video files. |
-| **FILENAME_FORMAT** | `standard` | Template for output files (`standard`, `full`, `short`, `season`, `episode`). |
-| **DOWNLOAD_DELAY** | `2` | Delay in seconds between starting downloads (prevents server throttling). |
-| **DOWNLOAD_TIMEOUT**| `3600` | Max seconds allowed for downloading a single episode stream. |
 
 ---
 
@@ -153,15 +159,17 @@ Every aspect of the downloader is customizable via settings inside the `.env` fi
 
 ```text
 KAA-Downloader/
-├── main.py               # Main pipeline manager & worker threads
-├── config.py             # Parses settings from .env
-├── requirements.txt      # Python dependencies
-├── .env.example          # Template configuration
+├── main.py               # CLI entrypoint & parallel pipeline manager
+├── config.py             # YAML & env config resolver with OS platformdirs
+├── pyproject.toml        # Pip package build & executable specification
+├── config.yaml           # Default configuration settings
+├── config.yaml.example   # Config template reference
+├── requirements.txt      # Python package dependencies
 │
-├── extractors/           # Extraction logic
+├── extractors/           # Scrapers & data models
 │   ├── __init__.py
-│   ├── hianime.py        # Base extractor & model dataclasses
-│   └── kickassanime.py   # KAA-specific API parsing & decoders
+│   ├── models.py         # Anime & Episode dataclasses
+│   └── kickassanime.py   # KAA API scraping & decoders
 │
 └── tools/                # Utilities
     ├── __init__.py
