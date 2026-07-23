@@ -1,0 +1,26 @@
+# KAA Downloader Configuration Example
+# Save this file to ~/.config/kaa-downloader/config.yaml (Linux/macOS)
+# or %APPDATA%\kaa-downloader\config.yaml (Windows)
+
+download:
+  download_workers: 6      # Number of parallel download threads
+  embed_workers: 4         # Number of parallel FFmpeg subtitle embedding processes
+  resolution: "720"        # Preferred video resolution (720, 1080)
+  audio_type: "sub"        # Preferred audio format (sub, dub)
+  subtitle_lang: "en"      # Subtitle language code (en, etc.)
+  download_delay: 2.0      # Throttle delay between downloads in seconds
+  download_timeout: 3600   # Max download timeout per episode in seconds
+  embed_timeout: 600       # Max embed timeout per episode in seconds
+  download_all: true       # Download all episodes by default
+  no_subtitles: false      # Disable subtitle extraction/embedding
+  embed_chapters: true     # Embed skip-time chapters into MKV container
+  default_season: 0        # Season number (0 = auto-detect from title)
+
+output:
+  output_dir: "output"     # Default directory for saved videos
+  filename_format: "standard" # Options: episode, season, short, standard, full
+
+logging:
+  verbose: true            # Show detailed worker logs
+  log_level: "INFO"        # Options: DEBUG, INFO, WARNING, ERROR
+  log_timestamps: true     # Include timestamps in console log output

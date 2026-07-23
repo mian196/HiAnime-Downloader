@@ -1,0 +1,24 @@
+# KAA Downloader Configuration
+
+download:
+  download_workers: 4
+  embed_workers: 4
+  resolution: "720"        # Options: "720", "1080"
+  audio_type: "sub"        # Options: "sub", "dub"
+  subtitle_lang: "en"
+  download_delay: 2.0
+  download_timeout: 3600
+  embed_timeout: 600
+  download_all: true
+  no_subtitles: false
+  embed_chapters: true
+  default_season: 0        # 0 = auto-detect
+
+output:
+  output_dir: "output"
+  filename_format: "standard" # Options: episode, season, short, standard, full
+
+logging:
+  verbose: true
+  log_level: "INFO"
+  log_timestamps: true
