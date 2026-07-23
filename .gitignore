@@ -211,3 +211,6 @@ __marimo__/
 output/
 # temp files
 tmp*
+# yaml files
+*.yaml
+*.yml
