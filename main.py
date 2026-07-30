@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -15,8 +16,6 @@ from functools import lru_cache
 
 from colorama import init, Fore, Style
 
-init()
-
 from config import (
     MAX_DOWNLOAD_WORKERS,
     MAX_EMBED_WORKERS,
@@ -31,7 +30,6 @@ from config import (
     VERBOSE,
     NO_SUBTITLES,
     EMBED_CHAPTERS,
-    DEFAULT_SEASON,
     FILENAME_FORMAT,
     ANIME_URL_QUEUE,
     LOG_LEVEL,
@@ -62,6 +60,8 @@ from tools.functions import (
     print_warning,
     parse_episode_expression,
 )
+
+init()
 
 
 shutdown_event = threading.Event()
@@ -101,7 +101,7 @@ def signal_handler(signum, frame):
         for proc in active_processes:
             try:
                 proc.terminate()
-            except:
+            except Exception:
                 pass
         active_processes.clear()
     sys.exit(1)
@@ -126,14 +126,14 @@ def run_subprocess(cmd: List[str], timeout: int, prefix: str = "") -> subprocess
                 if VERBOSE and prefix and any(x in line for x in ['[download]', '[hlsnative]', '[info]', 'Destination:']):
                     with print_lock:
                         print(f"{Fore.YELLOW}[{prefix}]{Style.RESET_ALL} {line.rstrip()}")
-        except:
+        except Exception:
             pass
 
     def read_stdout():
         try:
             for line in proc.stdout:
                 stdout_lines.append(line)
-        except:
+        except Exception:
             pass
 
     t1 = threading.Thread(target=read_stderr, daemon=True)
@@ -225,7 +225,7 @@ def download_episode(episode: Episode, output_dir: str, audio_type: str, resolut
             # Map audio type to language codes used in m3u8
             lang_code = "jpn" if audio_type == "sub" else "eng"
             format_filter = f"bestvideo[height<={resolution}]+bestaudio[language={lang_code}]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best"
-            
+
             cmd = [
                 'yt-dlp', '-f', format_filter,
                 '-o', video_path, '--no-warnings', '--retries', '10', '--fragment-retries', '10',
@@ -328,7 +328,7 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
     if not mal_id:
         logger.info(f"EP{episode.number:02d}: No MAL ID resolved, skipping chapter lookup")
         return None
-        
+
     logger.info(f"EP{episode.number:02d}: Checking AniSkip for intro/outro skip times (MAL ID: {mal_id})...")
     url = f"https://api.aniskip.com/v1/skip-times/{mal_id}/{episode.number}"
     params = {"types[]": ["op", "ed"]}
@@ -342,7 +342,7 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
             logger.info(f"EP{episode.number:02d}: No skip times found in AniSkip database")
             return None
 
-            
+
         op = None
         ed = None
         for res in data.get("results", []):
@@ -355,10 +355,10 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
                     op = (start, end)
                 elif skip_type == "ed":
                     ed = (start, end)
-                    
+
         if op is None and ed is None:
             return None
-            
+
         duration = 0.0
         ffprobe_cmd = [
             'ffprobe', '-v', 'quiet', '-print_format', 'json',
@@ -373,21 +373,21 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
                 if res.get("episode_length"):
                     duration = float(res.get("episode_length"))
                     break
-                    
+
         if duration <= 0.0:
             return None
-            
+
         chapters = []
         events = []
         if op and op[1] > op[0]:
             events.append((op[0], op[1], "Opening"))
         if ed and ed[1] > ed[0]:
             events.append((ed[0], ed[1], "Ending"))
-            
+
         events.sort(key=lambda x: x[0])
         current_time = 0.0
         part_idx = 1
-        
+
         for start, end, label in events:
             if start > current_time:
                 gap_label = "Prologue" if current_time == 0.0 else (f"Episode Part {part_idx}" if part_idx > 1 else "Episode")
@@ -396,11 +396,11 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
                 chapters.append({"start": current_time, "end": start, "title": gap_label})
             chapters.append({"start": start, "end": end, "title": label})
             current_time = end
-            
+
         if duration > current_time:
             gap_label = "Epilogue" if current_time > 0.0 else "Episode"
             chapters.append({"start": current_time, "end": duration, "title": gap_label})
-            
+
         metadata_filepath = os.path.splitext(video_path)[0] + "_metadata.txt"
         with open(metadata_filepath, "w", encoding="utf-8") as f:
             f.write(";FFMETADATA1\n")
@@ -413,7 +413,7 @@ def generate_chapters_metadata(episode: Episode, video_path: str, logger) -> Opt
                 f.write(f"START={start_ms}\n")
                 f.write(f"END={end_ms}\n")
                 f.write(f"title={ch['title']}\n\n")
-                
+
         return metadata_filepath
     except Exception as e:
         logger.warning(f"EP{episode.number:02d}: Chapter metadata generation failed: {e}")
@@ -428,7 +428,7 @@ def embed_subtitle(episode: Episode, worker_id: int = 0) -> Episode:
         return episode
 
     has_subs = episode.subtitle_path and os.path.exists(episode.subtitle_path)
-    
+
     metadata_path = generate_chapters_metadata(episode, episode.video_path, logger)
 
     has_chapters = metadata_path is not None and os.path.exists(metadata_path)
@@ -760,9 +760,6 @@ def scrape_and_download_parallel(
     download_workers: int,
     embed_workers: int
 ) -> dict:
-    import requests
-    from bs4 import BeautifulSoup
-    from tools.functions import sanitize_filename
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -942,7 +939,7 @@ def main():
     parser.add_argument('--download-delay', type=float, default=DOWNLOAD_DELAY, help='Delay between downloads in seconds')
     parser.add_argument('--no-subtitles', action='store_true', default=NO_SUBTITLES, help='Disable subtitle extraction/embedding')
     parser.add_argument('--url-file', help='Path to text file containing anime URLs (one per line)')
-    
+
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Subcommands')
     config_parser = subparsers.add_parser('config', help='Manage configuration')
@@ -1016,10 +1013,10 @@ def main():
         if AUDIO_TYPE in ('sub', 'dub'):
             if AUDIO_TYPE == 'sub' and anime.sub_episodes > 0:
                 anime.download_type = 'sub'
-                print_info(f"Using audio type from config: sub")
+                print_info("Using audio type from config: sub")
             elif AUDIO_TYPE == 'dub' and anime.dub_episodes > 0:
                 anime.download_type = 'dub'
-                print_info(f"Using audio type from config: dub")
+                print_info("Using audio type from config: dub")
             elif anime.sub_episodes > 0:
                 anime.download_type = 'sub'
                 print_warning(f"Requested '{AUDIO_TYPE}' not available, falling back to sub")

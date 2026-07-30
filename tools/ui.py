@@ -1,10 +1,9 @@
 """
 Modern Rich TUI Component for KAA Downloader
 """
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 if hasattr(sys.stdout, 'reconfigure'):
     try:

@@ -214,3 +214,4 @@ tmp*
 # yaml files
 *.yaml
 *.yml
+!.github/workflows/*.yml

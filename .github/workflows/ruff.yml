@@ -1,0 +1,22 @@
+name: Ruff Lint Check
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Ruff Lint Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Ruff check
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "check ."

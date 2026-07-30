@@ -42,3 +42,19 @@ kaa-downloader = "main:main"
 [tool.setuptools]
 py-modules = ["main", "config"]
 packages = ["extractors", "tools"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # Pyflakes
+    "W",  # pycodestyle warnings
+]
+ignore = [
+    "E501",  # line too long
+]
+
+
